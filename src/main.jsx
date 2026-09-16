@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createClient } from '@supabase/supabase-js'
 import './styles.css'
+import './home-refinement.css'
+import './admin.css'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
@@ -49,7 +51,8 @@ function App(){
   else if(path.startsWith('/product/')) page=<ProductDetail product={products.find(p=>p.slug===decodeURIComponent(path.split('/').pop()))} />
   else page=<NotFound />
 
-  return <><Nav path={path}/>{page}<Footer/></>
+  const isAdmin=path.startsWith('/admin')
+  return isAdmin?<>{page}</>:<><Nav path={path}/>{page}<Footer/></>
 }
 
 function Link({to,children,className=''}){
@@ -107,7 +110,7 @@ function Home({products}){
 
         <div className="hero-center">
           <div className="mascot-stage">
-            <img src="/haqlooks-logo.svg" alt="HAQLOOKS mascot" className="mascot-logo"/>
+            <img src="/mascot-latest.png" alt="HAQLOOKS orange cat mascot in streetwear" className="mascot-logo"/>
           </div>
         </div>
 
@@ -119,7 +122,7 @@ function Home({products}){
           <div className="est-note">EST. 2026</div>
           <div className="globe-mark"><GlobeIcon/></div>
           <div className="collage-shoe">
-            {heroImage?<img src={heroImage} alt={heroProduct.name}/>:<FallbackVisual p={heroProduct||fallbackProducts[0]}/>} 
+            <img src={heroImage||'/vibe-1.webp'} alt={heroProduct?.name||'Sneaker collage'}/>
           </div>
         </div>
       </div>
@@ -149,7 +152,7 @@ function Home({products}){
     <section className="story-section">
       <div className="shell story-grid">
         <div className="story-poster">
-          <div className="poster-frame"><img src="/haqlooks-logo.svg" alt="HAQLOOKS mascot poster"/></div>
+          <div className="poster-frame"><img src="/mascot-latest.png" alt="HAQLOOKS mascot poster"/></div>
           <div className="paper-note">SAME<br/>SNEAKERS<br/>DIFFERENT<br/>STORIES</div>
         </div>
         <div className="story-copy-block">
@@ -169,8 +172,7 @@ function Home({products}){
     <section className="newsletter-band">
       <div className="shell newsletter-inner">
         <div className="newsletter-title"><GlobeIcon/><h2>SNEAKERS<br/>HAVE NO BORDERS</h2></div>
-        <div className="newsletter-copy">Join our journey and get the latest drops, updates, and exclusive picks.</div>
-        <div className="newsletter-form"><input type="email" placeholder="Enter your email"/><button type="button">JOIN →</button></div>
+        <div className="newsletter-signup"><div className="newsletter-copy">Join our journey and get the latest drops, updates, and exclusive picks.</div><div className="newsletter-form"><input type="email" placeholder="Enter your email"/><button type="button">JOIN →</button></div></div>
         <div className="newsletter-scribble">WORLDWIDE<br/>SHIPPING ✈</div>
       </div>
     </section>
@@ -183,16 +185,17 @@ function Benefit({icon,title,copy}){
 
 function VibeCard({title,product,tone}){
   const img=product?.image_urls?.[0]
+  const reference={classic:'/vibe-1.webp',street:'/vibe-2.webp',bold:'/vibe-3.webp',daily:'/vibe-4.webp'}
   return <Link to="/shop" className={`vibe-card ${tone}`}>
-    <div className="vibe-media">{img?<img src={img} alt={title}/>:<FallbackVisual p={product||fallbackProducts[0]}/>}</div>
+    <div className="vibe-media"><img src={img||reference[tone]} alt={title}/></div>
     <div className="vibe-overlay"><h3>{title}</h3><span>Shop now →</span></div>
   </Link>
 }
 
 function Card({p,badge=''}){
-  const img=p.image_urls?.[0]
+  const img=p.image_urls?.[0] || (p.id?.startsWith('sample-')?`/drop-${p.id.slice(-1)}.webp`:null)
   const label=badge|| (p.status==='sold'?'SOLD':'')
-  return <article className="card product-card-precise">
+  return <article className={`card product-card-precise ${p.id?.startsWith('sample-')?'reference-card':''}`}>
     <Link to={`/product/${p.slug}`} className="visual product-media">
       {img?<img src={img} alt={p.name}/>:<FallbackVisual p={p}/>} 
       {label?<span className={`drop-badge ${label.toLowerCase()}`}>{label}</span>:null}
@@ -232,29 +235,55 @@ function ProductDetail({product}){
 
 function AdminLogin(){
   const [email,setEmail]=useState(''); const [password,setPassword]=useState(''); const [msg,setMsg]=useState(''); const [busy,setBusy]=useState(false)
-  async function submit(e){ e.preventDefault(); if(!supabase){setMsg('Supabase environment variables are not configured yet.');return} setBusy(true);setMsg(''); const {data,error}=await supabase.auth.signInWithPassword({email,password}); if(error){setMsg(error.message);setBusy(false);return} const {data:admin,error:aerr}=await supabase.from('admins').select('user_id').eq('user_id',data.user.id).maybeSingle(); if(aerr||!admin){await supabase.auth.signOut();setMsg('This account is not registered as a HAQLOOKS admin.');setBusy(false);return} navigate('/admin') }
-  return <main className="login-wrap"><div className="login-card"><div className="admin-brand">HAQLOOKS</div><p className="eyebrow orange">ADMIN ACCESS</p><h1>Manage the drop.</h1><form onSubmit={submit}><label>Email<input type="email" value={email} onChange={e=>setEmail(e.target.value)} required/></label><label>Password<input type="password" value={password} onChange={e=>setPassword(e.target.value)} required/></label>{msg&&<div className="error">{msg}</div>}<button className="btn primary wide" disabled={busy}>{busy?'SIGNING IN...':'SIGN IN'}</button></form></div></main>
+  async function submit(e){
+    e.preventDefault()
+    if(!supabase){setMsg('Supabase connection is missing in this local preview. Add the project environment variables to sign in.');return}
+    setBusy(true);setMsg('')
+    const {data,error}=await supabase.auth.signInWithPassword({email,password})
+    if(error){setMsg(error.message);setBusy(false);return}
+    const {data:admin,error:aerr}=await supabase.from('admins').select('user_id').eq('user_id',data.user.id).maybeSingle()
+    if(aerr||!admin){await supabase.auth.signOut();setMsg('This account is not registered as a HAQLOOKS admin.');setBusy(false);return}
+    navigate('/admin')
+  }
+  return <main className="admin-auth-page"><section className="auth-art"><div className="auth-art-inner"><img src="/mascot-latest.png" alt="HAQLOOKS mascot"/><p>PRE-OWNED SNEAKERS.<br/>NEW STORIES.</p></div></section><section className="auth-form-panel"><div className="auth-form-inner"><div className="auth-kicker">HAQLOOKS / OPERATIONS</div><h1>HAQLOOKS<br/><span>ADMIN</span></h1><p className="auth-lede">Sign in to manage the drop, inventory, and product stories.</p><form onSubmit={submit}><label>Email address<input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@haqlooks.com" autoComplete="username" required/></label><label>Password<input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••" autoComplete="current-password" required/></label>{msg&&<div className="error">{msg}</div>}<button className="btn primary wide" disabled={busy}>{busy?'SIGNING IN...':'SIGN IN →'}</button></form><Link to="/" className="auth-back">← Back to storefront</Link></div></section></main>
 }
 
 function AdminDashboard(){
   const [ready,setReady]=useState(false),[items,setItems]=useState([]),[msg,setMsg]=useState('Checking admin access...'),[editing,setEditing]=useState(null)
   useEffect(()=>{guard()},[])
-  async function guard(){ if(!supabase){setMsg('Supabase environment variables are missing.');return} const {data:{user}}=await supabase.auth.getUser(); if(!user){navigate('/admin/login');return} const {data}=await supabase.from('admins').select('user_id').eq('user_id',user.id).maybeSingle(); if(!data){await supabase.auth.signOut();navigate('/admin/login');return} setReady(true);load() }
-  async function load(){ const {data,error}=await supabase.from('products').select('*').order('created_at',{ascending:false}); if(error)setMsg(error.message); else {setItems(data||[]);setMsg('')} }
-  async function logout(){await supabase.auth.signOut();navigate('/admin/login')}
-  async function remove(p){ if(!confirm(`Delete ${p.name}?`))return; const {error}=await supabase.from('products').delete().eq('id',p.id); if(error)setMsg(error.message); else load() }
+  async function guard(){
+    if(!supabase){setItems(fallbackProducts);setMsg('Preview mode — connect Supabase to manage live inventory.');setReady(true);return}
+    const {data:{user}}=await supabase.auth.getUser(); if(!user){navigate('/admin/login');return}
+    const {data}=await supabase.from('admins').select('user_id').eq('user_id',user.id).maybeSingle(); if(!data){await supabase.auth.signOut();navigate('/admin/login');return}
+    setReady(true);load()
+  }
+  async function load(){
+    if(!supabase){setItems(fallbackProducts);return}
+    const {data,error}=await supabase.from('products').select('*').order('created_at',{ascending:false}); if(error)setMsg(error.message); else {setItems(data||[]);setMsg('')}
+  }
+  async function logout(){if(supabase)await supabase.auth.signOut();navigate('/admin/login')}
+  async function remove(p){
+    if(!supabase){setMsg('Preview mode only. Connect Supabase before deleting inventory.');return}
+    if(!confirm(`Delete ${p.name}?`))return
+    const {error}=await supabase.from('products').delete().eq('id',p.id); if(error)setMsg(error.message); else load()
+  }
   if(!ready)return <main className="admin-shell"><Empty text={msg}/></main>
-  const stats={all:items.length,available:items.filter(x=>x.status==='available').length,reserved:items.filter(x=>x.status==='reserved').length,sold:items.filter(x=>x.status==='sold').length}
-  return <main className="admin-shell"><div className="admin-head"><div><p className="eyebrow orange">HAQLOOKS ADMIN</p><h1>Product dashboard</h1></div><div className="actions"><button className="btn primary" onClick={()=>setEditing({})}>+ ADD PRODUCT</button><button className="btn outline" onClick={logout}>SIGN OUT</button></div></div><div className="stats">{Object.entries(stats).map(([k,v])=><div key={k}><span>{k}</span><strong>{v}</strong></div>)}</div>{msg&&<div className="error">{msg}</div>}<div className="panel"><div className="panel-head"><h2>Products</h2><button className="textlink fake" onClick={load}>REFRESH ↻</button></div>{!items.length?<Empty text="NO DATABASE PRODUCTS YET."/>:<div className="table-wrap"><table><thead><tr><th>Product</th><th>Status</th><th>Size</th><th>Price</th><th>Published</th><th></th></tr></thead><tbody>{items.map(p=><tr key={p.id}><td><strong>{p.name}</strong><small>{p.brand} · {p.slug}</small></td><td><Status s={p.status}/></td><td>{p.size_label||'—'}</td><td>{money(p.price_idr)}</td><td>{p.is_published?'YES':'NO'}</td><td><button className="mini" onClick={()=>setEditing(p)}>EDIT</button><button className="mini danger" onClick={()=>remove(p)}>DELETE</button></td></tr>)}</tbody></table></div>}</div>{editing!==null&&<ProductModal product={editing.id?editing:null} onClose={()=>setEditing(null)} onSaved={()=>{setEditing(null);load()}}/>}</main>
+  const stats={total:items.length,available:items.filter(x=>x.status==='available').length,reserved:items.filter(x=>x.status==='reserved').length,sold:items.filter(x=>x.status==='sold').length,published:items.filter(x=>x.is_published).length}
+  const thumb=(p)=>p.image_urls?.[0]||(p.id?.startsWith('sample-')?`/drop-${p.id.slice(-1)}.webp`:'/mascot-latest.png')
+  return <main className="admin-app"><aside className="admin-sidebar"><div className="admin-sidebar-brand"><img src="/mascot-latest.png" alt="HAQLOOKS"/><div><strong>HAQLOOKS</strong><span>STORE OPERATIONS</span></div></div><div className="admin-sidebar-nav"><p>WORKSPACE</p><button className="active" type="button">Dashboard</button><button type="button" onClick={()=>setEditing(null)}>Products</button><button type="button" onClick={()=>setEditing({})}>Add product</button></div><div className="admin-sidebar-footer"><span>Indonesia · IDR</span><button type="button" onClick={logout}>↪ Logout</button></div></aside><section className="admin-main"><header className="admin-topbar"><div><p className="admin-kicker">HAQLOOKS ADMIN / {supabase?'LIVE INVENTORY':'LOCAL PREVIEW'}</p><h1>Inventory Management</h1></div><div className="admin-top-actions"><button className="admin-refresh" type="button" onClick={load}>↻ Refresh</button><button className="admin-add" type="button" onClick={()=>setEditing({})}>+ Add product</button></div></header>{msg&&<div className="admin-notice">{msg}</div>}{editing!==null?<ProductEditor product={editing.id?editing:null} onClose={()=>setEditing(null)} onSaved={()=>{setEditing(null);load()}}/>:<><section className="admin-stats">{Object.entries(stats).map(([key,value])=><div className={`admin-stat ${key}`} key={key}><span>{key==='total'?'Total Products':key[0].toUpperCase()+key.slice(1)}</span><strong>{value}</strong><small>{key==='published'?'visible on storefront':key==='total'?'all inventory':'current status'}</small></div>)}</section><section className="admin-table-panel"><div className="admin-panel-head"><div><p className="admin-kicker">CATALOG</p><h2>Products</h2></div><span>{items.length} records</span></div>{!items.length?<Empty text="NO DATABASE PRODUCTS YET."/>:<div className="admin-table-wrap"><table className="admin-table"><thead><tr><th>Product</th><th>Size</th><th>Condition</th><th>Price</th><th>Status</th><th>Published</th><th></th></tr></thead><tbody>{items.map(p=><tr key={p.id}><td><div className="admin-product-cell"><img src={thumb(p)} alt=""/><div><strong>{p.name}</strong><small>{p.brand} {p.model||''}</small><small className="slug">/{p.slug}</small></div></div></td><td>{p.size_label||'—'}</td><td>{p.condition||'—'}</td><td><strong>{money(p.price_idr)}</strong>{p.price_usd?<small>US${p.price_usd}</small>:null}</td><td><span className={`admin-status ${p.status}`}>{p.status}</span></td><td><span className={`published-pill ${p.is_published?'yes':'no'}`}>{p.is_published?'Published':'Hidden'}</span></td><td><div className="row-actions"><button type="button" onClick={()=>setEditing(p)}>Edit</button><button type="button" className="danger" onClick={()=>remove(p)}>Delete</button></div></td></tr>)}</tbody></table></div>}</section></>}</section></main>
 }
 
-function ProductModal({product,onClose,onSaved}){
+function ProductEditor({product,onClose,onSaved}){
   const [f,setF]=useState({name:product?.name||'',slug:product?.slug||'',brand:product?.brand||'',model:product?.model||'',price_idr:product?.price_idr||'',price_usd:product?.price_usd||'',size_label:product?.size_label||'',condition:product?.condition||'Good',description:product?.description||'',status:product?.status||'available',featured:product?.featured||false,is_published:product?.is_published??true,image_urls:product?.image_urls||[]})
-  const [files,setFiles]=useState([]),[msg,setMsg]=useState(''),[busy,setBusy]=useState(false)
+  const [files,setFiles]=useState([]),[previews,setPreviews]=useState([]),[msg,setMsg]=useState(''),[busy,setBusy]=useState(false)
   const set=(k,v)=>setF(x=>({...x,[k]:v}))
+  function chooseFiles(list){const picked=[...list];setFiles(picked);setPreviews(picked.map(file=>URL.createObjectURL(file)))}
   async function upload(){const urls=[];for(const file of files){const ext=file.name.split('.').pop();const path=`${crypto.randomUUID()}.${ext}`;const {error}=await supabase.storage.from('product-images').upload(path,file);if(error)throw error;const {data}=supabase.storage.from('product-images').getPublicUrl(path);urls.push(data.publicUrl)}return urls}
-  async function save(e){e.preventDefault();setBusy(true);setMsg('');try{const uploaded=await upload();const payload={...f,slug:f.slug||slugify(f.name),price_idr:Number(f.price_idr||0),price_usd:f.price_usd?Number(f.price_usd):null,model:f.model||null,size_label:f.size_label||null,description:f.description||null,image_urls:[...f.image_urls,...uploaded]};const q=product?supabase.from('products').update(payload).eq('id',product.id):supabase.from('products').insert(payload);const {error}=await q;if(error)throw error;onSaved()}catch(err){setMsg(err.message||'Save failed')}setBusy(false)}
-  return <div className="modal-bg" onMouseDown={e=>{if(e.target===e.currentTarget)onClose()}}><div className="modal"><div className="modal-head"><h2>{product?'Edit product':'Add product'}</h2><button onClick={onClose}>×</button></div><form onSubmit={save} className="form-grid"><label>Name<input value={f.name} onChange={e=>{set('name',e.target.value);if(!product&&!f.slug)set('slug',slugify(e.target.value))}} required/></label><label>Slug<input value={f.slug} onChange={e=>set('slug',slugify(e.target.value))} required/></label><label>Brand<input value={f.brand} onChange={e=>set('brand',e.target.value)} required/></label><label>Model<input value={f.model} onChange={e=>set('model',e.target.value)}/></label><label>Price IDR<input type="number" value={f.price_idr} onChange={e=>set('price_idr',e.target.value)} required/></label><label>Price USD<input type="number" value={f.price_usd} onChange={e=>set('price_usd',e.target.value)}/></label><label>Size<input value={f.size_label} onChange={e=>set('size_label',e.target.value)} placeholder="EU 42 / US 8.5"/></label><label>Condition<input value={f.condition} onChange={e=>set('condition',e.target.value)}/></label><label>Status<select value={f.status} onChange={e=>set('status',e.target.value)}><option value="available">Available</option><option value="reserved">Reserved</option><option value="sold">Sold</option></select></label><label className="full">Description<textarea rows="5" value={f.description} onChange={e=>set('description',e.target.value)}/></label><label className="full">Upload photos<input type="file" accept="image/*" multiple onChange={e=>setFiles([...e.target.files])}/></label><label className="check"><input type="checkbox" checked={f.featured} onChange={e=>set('featured',e.target.checked)}/> Featured</label><label className="check"><input type="checkbox" checked={f.is_published} onChange={e=>set('is_published',e.target.checked)}/> Published</label>{msg&&<div className="error full">{msg}</div>}<div className="actions full"><button className="btn primary" disabled={busy}>{busy?'SAVING...':'SAVE PRODUCT'}</button><button type="button" className="btn outline" onClick={onClose}>CANCEL</button></div></form></div></div>
+  async function save(e){
+    e.preventDefault(); if(!supabase){setMsg('Preview mode only. Add Supabase environment variables to save products.');return}
+    setBusy(true);setMsg('');try{const uploaded=await upload();const payload={...f,slug:f.slug||slugify(f.name),price_idr:Number(f.price_idr||0),price_usd:f.price_usd?Number(f.price_usd):null,model:f.model||null,size_label:f.size_label||null,description:f.description||null,image_urls:[...f.image_urls,...uploaded]};const q=product?supabase.from('products').update(payload).eq('id',product.id):supabase.from('products').insert(payload);const {error}=await q;if(error)throw error;onSaved()}catch(err){setMsg(err.message||'Save failed')}setBusy(false)
+  }
+  return <section className="product-editor"><div className="editor-head"><div><p className="admin-kicker">CATALOG / {product?'EDIT PRODUCT':'NEW PRODUCT'}</p><h2>{product?'Edit product':'Add product'}</h2></div><button className="admin-close" type="button" onClick={onClose}>×</button></div><form onSubmit={save} className="editor-form"><div className="editor-section"><div className="editor-section-title"><span>01</span><div><h3>Basic Information</h3><p>Name, slug, and the public product identity.</p></div></div><div className="editor-fields two"><label>Product name<input value={f.name} onChange={e=>{set('name',e.target.value);if(!product&&!f.slug)set('slug',slugify(e.target.value))}} placeholder="Nike P-6000 Silver / Red" required/></label><label>Slug<input value={f.slug} onChange={e=>set('slug',slugify(e.target.value))} placeholder="p6000-silver-red" required/></label><label>Brand<input value={f.brand} onChange={e=>set('brand',e.target.value)} placeholder="Nike" required/></label><label>Model<input value={f.model} onChange={e=>set('model',e.target.value)} placeholder="P-6000"/></label></div></div><div className="editor-section"><div className="editor-section-title"><span>02</span><div><h3>Pricing</h3><p>Keep the primary IDR price clear for operations.</p></div></div><div className="editor-fields two"><label>Price IDR<input type="number" value={f.price_idr} onChange={e=>set('price_idr',e.target.value)} placeholder="1299000" required/></label><label>Price USD <em>optional</em><input type="number" value={f.price_usd} onChange={e=>set('price_usd',e.target.value)} placeholder="79"/></label></div></div><div className="editor-section"><div className="editor-section-title"><span>03</span><div><h3>Product details</h3><p>Condition, size, status, and customer facing story.</p></div></div><div className="editor-fields three"><label>Size<input value={f.size_label} onChange={e=>set('size_label',e.target.value)} placeholder="EU 42 / US 8.5"/></label><label>Condition<input value={f.condition} onChange={e=>set('condition',e.target.value)} placeholder="Excellent"/></label><label>Status<select value={f.status} onChange={e=>set('status',e.target.value)}><option value="available">Available</option><option value="reserved">Reserved</option><option value="sold">Sold</option></select></label><label className="full">Description<textarea rows="5" value={f.description} onChange={e=>set('description',e.target.value)} placeholder="Describe the pair, condition, and story..."/></label></div></div><div className="editor-section"><div className="editor-section-title"><span>04</span><div><h3>Images</h3><p>Upload multiple product photos to Supabase Storage.</p></div></div><div className="image-uploader"><div className="image-previews">{[...f.image_urls,...previews].map((src,i)=><img src={src} alt={`Product preview ${i+1}`} key={src+i}/>)}{!f.image_urls.length&&!previews.length&&<div className="image-empty"><span>+</span><b>No images yet</b><small>Use clear, well lit product photos.</small></div>}</div><label className="upload-drop"> <input type="file" accept="image/*" multiple onChange={e=>chooseFiles(e.target.files)}/><span>＋ Choose photos</span><small>{files.length?`${files.length} new file${files.length>1?'s':''} selected`:'PNG, JPG, or WEBP · multiple allowed'}</small></label></div></div><div className="editor-section"><div className="editor-section-title"><span>05</span><div><h3>Publishing</h3><p>Choose what customers can see right now.</p></div></div><div className="publish-options"><label className="toggle-option"><input type="checkbox" checked={f.featured} onChange={e=>set('featured',e.target.checked)}/><span><b>Featured product</b><small>Surface this pair in curated placements.</small></span></label><label className="toggle-option"><input type="checkbox" checked={f.is_published} onChange={e=>set('is_published',e.target.checked)}/><span><b>Published</b><small>Show this product on the public storefront.</small></span></label></div></div>{msg&&<div className="error">{msg}</div>}<div className="editor-actions"><button className="admin-add" disabled={busy}>{busy?'Saving...':'Save product →'}</button><button type="button" className="admin-cancel" onClick={onClose}>Cancel</button></div></form></section>
 }
 
 function NotFound(){return <main className="login-wrap"><div className="empty"><b>404 — PAGE NOT FOUND</b><br/><br/><Link to="/" className="textlink">BACK HOME →</Link></div></main>}
@@ -270,3 +299,4 @@ function Footer(){
 }
 
 createRoot(document.getElementById('root')).render(<App />)
+

@@ -35,3 +35,4 @@ dist
 ```
 
 The app uses Supabase RLS for public product reads and admin CRUD. Sold products remain visible in the Archive.
+

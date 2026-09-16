@@ -1,0 +1,81 @@
+/* Desktop homepage calibrated to the supplied MORE THAN SNEAKERS mockup. */
+.fallback:before{background-image:url('/mascot-latest.png')!important;}
+@media (min-width: 1051px) {
+  .shell { width: min(1320px, calc(100% - 8.8%)); }
+  .nav-inner { height: clamp(55px, 4.5vw, 65px); grid-template-columns: 230px 1fr 150px; }
+  .brand-wordmark { font-size: 2.15rem; }
+  .nav-links { justify-content: flex-start; gap: 44px; font-size: .82rem; }
+  .nav-links a { padding-top: 23px; padding-bottom: 21px; }
+  .nav-tools { justify-content: flex-end; gap: 22px; }
+  .hero-layout { min-height: clamp(490px, 45.6vw, 660px); grid-template-columns: 36% 40% 24%; }
+  .hero-left { position: relative; z-index: 3; justify-content: flex-start; padding: 22px 0 8px; }
+  .hero-title { font-size: clamp(4.8rem, 7vw, 6.8rem); line-height: .78; letter-spacing: -.072em; white-space: nowrap; transform:scaleX(.84); transform-origin:left top; }
+  .hero-script { margin-top: 12px; font-size: clamp(2.2rem, 3.5vw, 3.4rem); white-space: nowrap; transform:rotate(-3deg) scaleX(.9); }
+  .hero-copy { margin-top: 18px; font-size: .9rem; line-height: 1.4; }
+  .hero-shop-btn { margin-top: 18px; width: 202px; min-height: 47px; padding: 0 25px; font-size: .9rem; }
+  .trust-row { margin-top: auto; padding-top: 8px; border-top: 0; }
+  .trust-item { align-items: center; text-align: center; gap: 8px; }
+  .trust-item svg { width: 33px; height: 33px; }
+  .trust-item span { font-size: .7rem; letter-spacing: .035em; }
+  .hero-center { overflow: visible; z-index: 2; }
+  .mascot-stage { overflow: hidden; background: none; }
+  .mascot-stage:before { display: none; }
+  /* Keep the source artwork intact: the full square PNG fits inside the hero column. */
+  .mascot-logo { position: absolute; inset: 0; width: 100%; max-width: none; height: 100%; object-fit: contain; object-position: 50% 50%; clip-path: none; transform: none; filter: drop-shadow(0 20px 24px #000); }
+  .hero-right { z-index: 3; overflow: visible; border-left: 0; background: linear-gradient(135deg,#0b0c0b,#121313 55%,#080808); }
+  .hero-right:before { width: 220px; height: 115px; right: -25px; top: 20px; background: rgba(200,200,200,.085); }
+  .hero-right:after { width: 230px; height: 150px; left: -25px; bottom: 10px; }
+  .crown { font-size: 3rem; left: -55px; top: 22px; }
+  .green-note { top: 95px; left: -50px; font-size: clamp(1.25rem, 2.1vw, 1.9rem); }
+  .vertical-words { top: 48px; right: 8px; font-size: clamp(.9rem, 1.45vw, 1.3rem); line-height: 1.13; letter-spacing: .07em; }
+  .brand-tape { top: 58%; left: 18px; padding: 11px; font-size: 1.25rem; }
+  .est-note { top: 67%; left: 65px; font-size: .9rem; }
+  .globe-mark { top: 250px; right: -25px; width: 145px; height: 145px; }
+  .collage-shoe { left: 18px; right: 0; bottom: 0; height: 28%; transform: rotate(-7deg); border: 4px solid #111; }
+  .latest-section { padding: 26px 0 22px; }
+  .latest-head { margin-bottom: 14px; }
+  .latest-head h2 { font-size: 3.2rem; }
+  .latest-head > span, .vibe-head > span { font-size: .77rem; }
+  .view-all { font-size: .83rem; }
+  .grid, .vibe-grid { gap: 20px; }
+  .visual { aspect-ratio: 1/.72; }
+  .visual > img { object-fit: cover; }
+  .card-body { padding: 8px 12px 10px; }
+  .reference-card .drop-badge, .reference-card .heart { display: none; }
+  .product-info h3 { font-size: .89rem; }
+  .product-info > p { font-size: .75rem; margin-bottom: 2px; }
+  .product-meta-line { display: none; }
+  .product-price-row { margin-top: 0; }
+  .vibe-head h2 { font-size: 3.1rem; }
+  .vibe-card { height: 184px; }
+  .vibe-media { filter: brightness(.72) saturate(.72); }
+  .vibe-card.street .vibe-media { filter: brightness(.72) saturate(.85); }
+  .vibe-overlay { left: 22px; bottom: 15px; }
+  .vibe-overlay h3 { font-size: 1.45rem; max-width: 170px; line-height: .98; }
+  .vibe-overlay span { font-size: .72rem; }
+  .story-section { padding: 8px 0 10px; }
+  .story-grid { grid-template-columns: 24% 43% 33%; }
+  .story-poster { min-height: 220px; }
+  .poster-frame img { object-fit: cover; filter: grayscale(1) contrast(1.14); }
+  .story-copy-block { padding: 18px 25px; }
+  .story-copy-block h2 { font-size: 1.68rem; }
+  .story-copy-block > p:last-child { font-size: .76rem; margin-top: 10px; }
+  .story-benefits { padding: 18px 0 4px 30px; gap: 10px; }
+  .newsletter-band { padding: 15px 0; }
+  .newsletter-inner { grid-template-columns: 37% 43% 20%; gap: 12px; }
+  .newsletter-title h2 { font-size: 1.52rem; }
+  .newsletter-signup { display: grid; gap: 7px; }
+  .newsletter-copy { font-size: .7rem; }
+  .newsletter-form input { min-height: 34px; }
+  .newsletter-scribble { font-size: 1.1rem; }
+  footer { padding-top: 30px; }
+}
+
+@media (max-width: 1050px) {
+  .mascot-logo { inset: 0; width: 100%; height: 100%; object-fit: contain; object-position: center; clip-path: none; transform: none; }
+}
+
+@media (max-width: 760px) {
+  .mascot-logo { inset: 0; width: 100%; height: 100%; object-fit: contain; object-position: center; clip-path: none; transform: none; }
+}
+

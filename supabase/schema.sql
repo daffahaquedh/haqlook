@@ -54,3 +54,4 @@ create policy "Admins can update product images" on storage.objects for update t
 
 drop policy if exists "Admins can delete product images" on storage.objects;
 create policy "Admins can delete product images" on storage.objects for delete to authenticated using (bucket_id='product-images' and exists (select 1 from public.admins where admins.user_id=auth.uid()));
+
