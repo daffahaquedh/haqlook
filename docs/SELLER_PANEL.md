@@ -65,7 +65,7 @@ The seller UI requires a configured Supabase project and a staff Auth user. With
 
 `supabase/functions/seller-ai/index.ts` is the server-side `ITEM_ANALYSIS` endpoint. It authenticates the Supabase session, checks the `admins` role, loads the product through RLS, limits analysis to up to five optimized Supabase Storage image URLs, reserves monthly budget through `reserve_ai_usage`, calls OpenAI Responses with structured JSON output, and records actual token usage through `finalize_ai_usage`.
 
-The default model is `gpt-5.6-luna`. The OpenAI key is read only from the encrypted Supabase Edge Function environment. Pricing is centralized in `supabase/functions/seller-ai/pricing.ts`; the model rates and IDR conversion can be overridden by server-side configuration. No `OPENAI_API_KEY` or service-role key belongs in Vite env, browser storage, source code, or GitHub.
+Item Analysis uses `gpt-6-luna` with Responses API reasoning effort `low`. The OpenAI key is read only from the encrypted Supabase Edge Function environment. Pricing is centralized in `supabase/functions/seller-ai/pricing.ts` (input $0.10, cached input $0.01, output $0.50 per million tokens); rates and IDR conversion can be overridden by server-side configuration. No `OPENAI_API_KEY` or service-role key belongs in Vite env, browser storage, source code, or GitHub.
 
 The product detail action is intentionally review-first: AI output is shown in a mobile-friendly sheet, every mapped product field is opt-in, and `APPLY SUGGESTIONS` is the only path that updates the product. The result always carries `authenticity_not_verified` and `manual verification required`; AI never claims authentication.
 

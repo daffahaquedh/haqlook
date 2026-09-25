@@ -2,6 +2,7 @@ import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { DEFAULT_MODEL, estimateCostIdr, maxOutputTokens, reservationCostIdr } from './pricing.ts'
 import { ITEM_ANALYSIS_SCHEMA, normalizeItemAnalysis } from './analysis-schema.ts'
+import { createItemAnalysisRequest } from './analysis-request.js'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -52,8 +53,10 @@ function outputText(payload: Record<string, unknown>) {
 
 function usageTokens(payload: Record<string, unknown>) {
   const usage = payload.usage && typeof payload.usage === 'object' ? payload.usage as Record<string, unknown> : {}
+  const inputDetails = usage.input_tokens_details && typeof usage.input_tokens_details === 'object' ? usage.input_tokens_details as Record<string, unknown> : {}
   return {
     input: Math.max(0, Math.floor(safeNumber(usage.input_tokens ?? usage.prompt_tokens))),
+    cachedInput: Math.max(0, Math.floor(safeNumber(inputDetails.cached_tokens))),
     output: Math.max(0, Math.floor(safeNumber(usage.output_tokens ?? usage.completion_tokens))),
   }
 }
@@ -99,7 +102,7 @@ Deno.serve(async (request) => {
   const imageUrls = (Array.isArray(item.image_urls) ? item.image_urls : []).map((url) => optimizedImageUrl(url, supabaseUrl)).filter(Boolean).slice(0, 5) as string[]
   if (!imageUrls.length) return errorResponse('IMAGE_UNAVAILABLE', 'Add at least one image from Supabase Storage before analyzing this item.', 422)
 
-  const model = String(Deno.env.get('OPENAI_SELLER_MODEL') || DEFAULT_MODEL)
+  const model = DEFAULT_MODEL
   const reservedCost = reservationCostIdr(model)
   const { data: usageId, error: reserveError } = await supabase.rpc('reserve_ai_usage', { p_feature: 'ITEM_ANALYSIS', p_model: model, p_estimated_cost: reservedCost })
   if (reserveError || !usageId) {
@@ -136,12 +139,12 @@ Deno.serve(async (request) => {
     openAiResponse = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
       headers: { Authorization: `Bearer ${openAiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+      body: JSON.stringify(createItemAnalysisRequest({
         model,
         input,
-        max_output_tokens: maxOutputTokens(),
-        text: { format: { type: 'json_schema', name: 'item_analysis', strict: true, schema: ITEM_ANALYSIS_SCHEMA } },
-      }),
+        maxOutputTokens: maxOutputTokens(),
+        schema: ITEM_ANALYSIS_SCHEMA,
+      })),
       signal: controller.signal,
     })
   } catch (error) {
@@ -167,7 +170,7 @@ Deno.serve(async (request) => {
   }
   const result = normalizeItemAnalysis(parsed)
   const tokens = usageTokens(payload || {})
-  const actualCost = estimateCostIdr(model, tokens.input, tokens.output)
+  const actualCost = estimateCostIdr(model, tokens.input, tokens.output, tokens.cachedInput)
   const { error: finalizeError } = await supabase.rpc('finalize_ai_usage', { p_usage_id: usageId, p_input_tokens: tokens.input, p_output_tokens: tokens.output, p_estimated_cost: actualCost })
   if (finalizeError) return errorResponse('AI_USAGE_FINALIZE_FAILED', 'The analysis completed but its usage could not be recorded.', 500)
   const { data: usage } = await supabase.rpc('seller_ai_usage_summary')
