@@ -44,12 +44,7 @@ export default function SellerApp({ path }) {
 
   useEffect(() => {
     let active = true
-    async function loadSession() {
-      if (!supabase) {
-        if (active) setAuth({ state: 'signed_out', user: null, profile: null })
-        return
-      }
-      const { data: { session } } = await supabase.auth.getSession()
+    async function resolveSession(session) {
       if (!session) {
         if (active) setAuth({ state: 'signed_out', user: null, profile: null })
         return
@@ -58,15 +53,21 @@ export default function SellerApp({ path }) {
       if (!active) return
       if (error || !profile || !['ADMIN', 'SELLER'].includes(String(profile.role || '').toUpperCase())) {
         await supabase.auth.signOut()
-        setAuth({ state: 'signed_out', user: null, profile: null })
+        if (active) setAuth({ state: 'signed_out', user: null, profile: null })
         return
       }
       setAuth({ state: 'signed_in', user: session.user, profile: { ...profile, role: String(profile.role).toUpperCase() } })
     }
+    async function loadSession() {
+      if (!supabase) {
+        if (active) setAuth({ state: 'signed_out', user: null, profile: null })
+        return
+      }
+      const { data: { session } } = await supabase.auth.getSession()
+      await resolveSession(session)
+    }
     loadSession()
-    const { data: listener } = supabase?.auth.onAuthStateChange((_event, session) => {
-      if (!session) setAuth({ state: 'signed_out', user: null, profile: null })
-    }) || { data: null }
+    const { data: listener } = supabase?.auth.onAuthStateChange((_event, session) => { setTimeout(() => { void resolveSession(session) }, 0) }) || { data: null }
     return () => { active = false; listener?.subscription?.unsubscribe() }
   }, [])
 
@@ -116,7 +117,7 @@ function SellerWorkspace({ path, profile, onLogout }) {
   else if (section === 'sales') page = <SalesPage />
   else if (section === 'ai-usage') page = <AIUsagePage />
   else if (section === 'settings') page = profile.role === 'ADMIN' ? <SettingsPage /> : <AccessDenied />
-  return <main className="seller-app"><SellerSidebar path={path} profile={profile} onLogout={onLogout} /><section className="seller-content">{page}</section></main>
+  return <main className="seller-app"><SellerSidebar path={path} profile={profile} onLogout={onLogout} /><section className="seller-content">{page}</section><SellerMobileNav path={path} profile={profile} onLogout={onLogout} /></main>
 }
 
 function SellerSidebar({ path, profile, onLogout }) {
@@ -132,6 +133,19 @@ function SellerSidebar({ path, profile, onLogout }) {
   ]
   if (profile.role === 'ADMIN') links.push(['/seller/settings', 'Settings', '⚙'])
   return <aside className="seller-sidebar"><div className="seller-brand"><img src="/mascot-latest.png" alt="" /><div><strong>HAQLOOKS</strong><span>SELLER PANEL</span></div></div><nav>{links.map(([href, label, icon]) => <a key={href} href={href} className={(href === '/seller' ? path === href : path.startsWith(href)) ? 'active' : ''} onClick={(event) => { event.preventDefault(); go(href) }}><i>{icon}</i><span>{label}</span></a>)}</nav><div className="seller-user"><span className="role-pill">{profile.role}</span><small>{profile.email || 'Authenticated seller'}</small><button type="button" onClick={onLogout}>↪ Sign out</button></div></aside>
+}
+
+function SellerMobileNav({ path, profile, onLogout }) {
+  const [moreOpen, setMoreOpen] = useState(false)
+  const primary = [['/seller', 'Home', '⌂'], ['/seller/inventory', 'Inventory', '▣'], ['/seller/inventory/new', 'Add', '+'], ['/seller/ai-hunter', 'Hunter', '✦']]
+  const more = [['/seller/sourcing', 'Sourcing', '◌'], ['/seller/listings', 'Listings', '↗'], ['/seller/sales', 'Sales', '◎'], ['/seller/ai-usage', 'AI Usage', '◒']]
+  if (profile.role === 'ADMIN') more.push(['/seller/settings', 'Settings', '⚙'])
+  const isActive = (href) => href === '/seller' ? path === href : href === '/seller/inventory/new' ? path === href : href === '/seller/inventory' ? path.startsWith(href) && path !== '/seller/inventory/new' : path.startsWith(href)
+  function navigate(href) { setMoreOpen(false); go(href) }
+  return <>
+    {moreOpen && <div className="seller-more-sheet" role="dialog" aria-label="More seller tools"><div className="seller-more-head"><strong>More tools</strong><button type="button" aria-label="Close more menu" onClick={() => setMoreOpen(false)}>×</button></div>{more.map(([href, label, icon]) => <a key={href} href={href} className={isActive(href) ? 'active' : ''} onClick={(event) => { event.preventDefault(); navigate(href) }}><i>{icon}</i><span>{label}</span></a>)}<button type="button" className="seller-more-logout" onClick={onLogout}>↪ Sign out</button></div>}
+    <nav className="seller-mobile-nav" aria-label="Seller navigation">{primary.map(([href, label, icon]) => <a key={href} href={href} className={`${isActive(href) ? 'active' : ''} ${label === 'Add' ? 'add' : ''}`} onClick={(event) => { event.preventDefault(); navigate(href) }}><i>{icon}</i><span>{label}</span></a>)}<button type="button" className={moreOpen || more.some(([href]) => isActive(href)) ? 'active' : ''} onClick={() => setMoreOpen((value) => !value)}><i>•••</i><span>More</span></button></nav>
+  </>
 }
 
 function SellerHeader({ eyebrow, title, copy, action }) {

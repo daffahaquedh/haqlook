@@ -4,3 +4,36 @@
 @media(max-width:700px){.seller-sidebar{grid-template-columns:1fr auto}.seller-sidebar nav{grid-column:1/-1;grid-row:2;justify-content:flex-start;padding-top:8px}.seller-sidebar nav a{flex:0 0 auto}.seller-sidebar nav a span{font-size:.6rem}.seller-content{padding:22px 12px 88px}.seller-header{align-items:flex-start;flex-direction:column;gap:14px;margin-bottom:21px}.seller-header h1{font-size:3.25rem}.seller-header .seller-primary,.seller-header .seller-secondary{width:100%}.seller-stat-grid{grid-template-columns:repeat(2,1fr)}.seller-stat:last-child{grid-column:1/-1}.seller-finance-grid{grid-template-columns:1fr 1fr}.seller-metric strong{font-size:.82rem}.seller-panel{padding:15px}.seller-panel-title h2{font-size:1.4rem}.inventory-toolbar{grid-template-columns:1fr 1fr}.inventory-toolbar input:first-child{grid-column:1/-1}.inventory-card{grid-template-columns:68px minmax(0,1fr);gap:10px}.inventory-card>img{width:68px;height:68px}.inventory-card h2{font-size:.8rem}.inventory-card-bottom{align-items:flex-end;flex-direction:column;gap:2px}.detail-hero{grid-template-columns:100px 1fr}.detail-hero>img{width:100px;height:100px}.detail-hero strong{font-size:1.15rem}.detail-side{grid-template-columns:1fr}.detail-side>.seller-danger-button{grid-column:auto}.seller-fields.two,.seller-fields.three{grid-template-columns:1fr}.seller-fields label:last-child{grid-column:auto}.photo-uploader{grid-template-columns:1fr}.photo-preview-grid{grid-template-columns:repeat(3,1fr)}.photo-preview-grid img{height:90px}.sourcing-card-head{display:grid}.sourcing-card-meta{align-items:stretch;display:grid;grid-template-columns:1fr 1fr}.sourcing-card-meta select{width:100%;margin:0;grid-column:1/-1}.move-inventory{display:grid}.wide-row{grid-template-columns:36px minmax(0,1fr) auto}.wide-row img{width:36px;height:36px}.wide-row small{display:none}.wide-row .listing-status{grid-column:2}.ai-budget-card{padding:18px}.ai-budget-card strong{font-size:1.35rem}.big-budget-percent{font-size:2.5rem}.seller-auth-art{min-height:260px}.seller-auth-card{width:min(100% - 32px,470px);padding:33px 0}.seller-auth-art img{width:200px}}
 .seller-header-actions{display:flex;align-items:center;gap:9px}.check-field{display:flex!important;align-items:center;gap:8px}.check-field input{width:17px;min-height:17px;accent-color:#2fa38c}.seller-header-actions .seller-secondary{white-space:nowrap}
 @media(max-width:700px){.seller-header-actions{width:100%;justify-content:space-between}.seller-header-actions .seller-secondary{flex:1}.seller-header-actions .inventory-status{flex:0 0 auto}}
+
+/* Mobile app shell: the desktop sidebar becomes a thumb-friendly bottom tab bar. */
+.seller-mobile-nav{display:none}
+.seller-more-sheet{display:none}
+.seller-app{overflow-x:hidden}
+@media(max-width:700px){
+  .seller-sidebar{top:0;padding-top:max(10px, env(safe-area-inset-top));}
+  .seller-sidebar nav,.seller-sidebar .seller-user{display:none}
+  .seller-content{padding-bottom:calc(108px + env(safe-area-inset-bottom));}
+  .seller-mobile-nav{position:fixed;z-index:80;right:0;bottom:0;left:0;display:grid;grid-template-columns:repeat(5,1fr);gap:2px;padding:7px 8px calc(7px + env(safe-area-inset-bottom));border-top:1px solid #304138;background:rgba(14,20,16,.97);box-shadow:0 -10px 26px rgba(0,0,0,.22);backdrop-filter:blur(14px)}
+  .seller-mobile-nav a,.seller-mobile-nav button{min-width:0;min-height:48px;display:grid;place-items:center;align-content:center;gap:3px;border:0;border-radius:5px;background:transparent;color:#84938a;font-size:.58rem;font-weight:800;text-decoration:none}
+  .seller-mobile-nav a i,.seller-mobile-nav button i{font-style:normal;font-size:1.05rem;line-height:1;color:#6fae9a}
+  .seller-mobile-nav a.active,.seller-mobile-nav button.active{background:#1b332d;color:#efe6d2}
+  .seller-mobile-nav a.active i,.seller-mobile-nav button.active i{color:#76d4b2}
+  .seller-mobile-nav a.add{margin-top:-16px;min-height:64px;border:1px solid #467e6b;border-radius:50%;background:#efe6d2;color:#11140f;box-shadow:0 7px 16px rgba(0,0,0,.32)}
+  .seller-mobile-nav a.add i{font-size:1.55rem;color:#11140f}
+  .seller-more-sheet{position:fixed;z-index:90;right:10px;bottom:calc(76px + env(safe-area-inset-bottom));left:10px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:12px;border:1px solid #3b5045;border-radius:7px;background:#121a15;box-shadow:0 18px 42px rgba(0,0,0,.42)}
+  .seller-more-head{grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;padding:2px 3px 6px;color:#efe6d2;font-size:.76rem}
+  .seller-more-head button{width:36px;height:36px;border:0;border-radius:4px;background:#1e2c24;color:#d9e0d8;font-size:1.25rem}
+  .seller-more-sheet a,.seller-more-logout{min-height:48px;display:flex;align-items:center;gap:8px;padding:0 10px;border:1px solid #2e4035;border-radius:4px;background:#17221b;color:#bac6bd;font-size:.66rem;font-weight:800;text-decoration:none}
+  .seller-more-sheet a i{width:20px;font-style:normal;text-align:center;color:#75b99f}
+  .seller-more-sheet a.active{border-color:#4f977e;background:#1b382e;color:#efe6d2}
+  .seller-more-logout{grid-column:1/-1;justify-content:center;border-color:#754138;background:#371d19;color:#f0a18c}
+  .seller-form-actions{position:sticky;z-index:20;bottom:calc(66px + env(safe-area-inset-bottom));margin:0 -4px;padding:10px 4px;background:linear-gradient(180deg,rgba(10,12,11,0),#0a0c0b 24%)}
+  .seller-form-actions .seller-primary,.seller-form-actions .seller-secondary{flex:1;min-width:0}
+  .inventory-toolbar{position:sticky;z-index:15;top:calc(56px + env(safe-area-inset-top));padding:8px 0;background:linear-gradient(#0a0c0b 78%,rgba(10,12,11,0))}
+  .seller-finance-grid{display:flex;overflow-x:auto;gap:8px;padding-bottom:4px;scroll-snap-type:x proximity}
+  .seller-finance-grid .seller-metric{flex:0 0 154px;scroll-snap-align:start}
+  .seller-stat{min-height:100px;padding:13px}
+  .seller-primary,.seller-secondary,.seller-danger-button,.pagination button,.listing-row button{min-height:44px}
+  .seller-modal-bg{align-items:end;padding:0}
+  .seller-modal{max-height:calc(94vh - env(safe-area-inset-top));padding:17px 14px calc(17px + env(safe-area-inset-bottom));border-radius:10px 10px 0 0}
+}
