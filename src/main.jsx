@@ -4,11 +4,23 @@ import { createClient } from '@supabase/supabase-js'
 import './styles.css'
 import './home-refinement.css'
 import './admin.css'
+import './seller.css'
+import SellerApp from './seller.jsx'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
 const WHATSAPP = import.meta.env.VITE_WHATSAPP_NUMBER || ''
 const supabase = SUPABASE_URL && SUPABASE_KEY ? createClient(SUPABASE_URL, SUPABASE_KEY) : null
+
+async function loadStaffRow(userId){
+  if(!supabase) return {data:null,error:null}
+  const current=await supabase.from('admins').select('user_id,role').eq('user_id',userId).maybeSingle()
+  if(!current.error) return current
+  // Keep the existing admin route usable during a staged migration. Legacy rows
+  // in the old schema are admins by definition; seller access still requires V1.
+  const legacy=await supabase.from('admins').select('user_id').eq('user_id',userId).maybeSingle()
+  return legacy.error?legacy:{data:legacy.data?{...legacy.data,role:'ADMIN'}:null,error:null}
+}
 
 const fallbackProducts = [
   { id:'sample-1', slug:'p6000-silver-red', name:'P-6000 Silver / Red', brand:'Nike', model:'P-6000', price_idr:1299000, price_usd:79, size_label:'EU 42 / US 8.5', condition:'Excellent', description:'Curated pre-owned runner with metallic silver panels and red accents. Clean upper, fresh midsole, and ready for daily rotation.', status:'available', featured:true, is_published:true, image_urls:[], created_at:'2026-09-16T10:00:00Z' },
@@ -48,11 +60,12 @@ function App(){
   else if(path==='/shipping') page=<Shipping />
   else if(path==='/admin/login') page=<AdminLogin />
   else if(path==='/admin') page=<AdminDashboard />
+  else if(path==='/seller' || path.startsWith('/seller/')) page=<SellerApp path={path} />
   else if(path.startsWith('/product/')) page=<ProductDetail product={products.find(p=>p.slug===decodeURIComponent(path.split('/').pop()))} />
   else page=<NotFound />
 
-  const isAdmin=path.startsWith('/admin')
-  return isAdmin?<>{page}</>:<><Nav path={path}/>{page}<Footer/></>
+  const isOperations=path.startsWith('/admin') || path.startsWith('/seller')
+  return isOperations?<>{page}</>:<><Nav path={path}/>{page}<Footer/></>
 }
 
 function Link({to,children,className=''}){
@@ -241,8 +254,8 @@ function AdminLogin(){
     setBusy(true);setMsg('')
     const {data,error}=await supabase.auth.signInWithPassword({email,password})
     if(error){setMsg(error.message);setBusy(false);return}
-    const {data:admin,error:aerr}=await supabase.from('admins').select('user_id').eq('user_id',data.user.id).maybeSingle()
-    if(aerr||!admin){await supabase.auth.signOut();setMsg('This account is not registered as a HAQLOOKS admin.');setBusy(false);return}
+    const {data:admin,error:aerr}=await loadStaffRow(data.user.id)
+    if(aerr||!admin||String(admin.role||'ADMIN').toUpperCase()!=='ADMIN'){await supabase.auth.signOut();setMsg('This account is not registered as a HAQLOOKS admin.');setBusy(false);return}
     navigate('/admin')
   }
   return <main className="admin-auth-page"><section className="auth-art"><div className="auth-art-inner"><img src="/mascot-latest.png" alt="HAQLOOKS mascot"/><p>PRE-OWNED SNEAKERS.<br/>NEW STORIES.</p></div></section><section className="auth-form-panel"><div className="auth-form-inner"><div className="auth-kicker">HAQLOOKS / OPERATIONS</div><h1>HAQLOOKS<br/><span>ADMIN</span></h1><p className="auth-lede">Sign in to manage the drop, inventory, and product stories.</p><form onSubmit={submit}><label>Email address<input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@haqlooks.com" autoComplete="username" required/></label><label>Password<input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••" autoComplete="current-password" required/></label>{msg&&<div className="error">{msg}</div>}<button className="btn primary wide" disabled={busy}>{busy?'SIGNING IN...':'SIGN IN →'}</button></form><Link to="/" className="auth-back">← Back to storefront</Link></div></section></main>
@@ -254,7 +267,7 @@ function AdminDashboard(){
   async function guard(){
     if(!supabase){setItems(fallbackProducts);setMsg('Preview mode — connect Supabase to manage live inventory.');setReady(true);return}
     const {data:{user}}=await supabase.auth.getUser(); if(!user){navigate('/admin/login');return}
-    const {data}=await supabase.from('admins').select('user_id').eq('user_id',user.id).maybeSingle(); if(!data){await supabase.auth.signOut();navigate('/admin/login');return}
+    const {data}=await loadStaffRow(user.id); if(!data||String(data.role||'ADMIN').toUpperCase()!=='ADMIN'){await supabase.auth.signOut();navigate('/admin/login');return}
     setReady(true);load()
   }
   async function load(){
