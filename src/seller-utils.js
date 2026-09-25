@@ -11,18 +11,66 @@ export const INVENTORY_STATUSES = ['draft', 'available', 'reserved', 'sold', 'ar
 export const LISTING_STATUSES = ['NOT_LISTED', 'DRAFT', 'LISTED', 'SOLD', 'REMOVED']
 
 export const ITEM_ANALYSIS_SUGGESTIONS = [
-  { key: 'detected_brand', label: 'Brand', target: 'brand' },
-  { key: 'suggested_title', label: 'Title', target: 'name' },
-  { key: 'suggested_category', label: 'Category', target: 'category' },
-  { key: 'condition_summary', label: 'Condition summary', target: 'condition_notes' },
-  { key: 'visible_defects', label: 'Visible defects', target: 'defects' },
-  { key: 'seller_notes', label: 'Seller notes', target: 'description' },
+  { key: 'detected_brand', label: 'Merek terdeteksi', labelEn: 'Detected brand', target: 'brand' },
+  { key: 'suggested_title', label: 'Judul yang disarankan', labelEn: 'Suggested title', target: 'name' },
+  { key: 'suggested_category', label: 'Kategori', labelEn: 'Category', target: 'category' },
+  { key: 'condition_summary', label: 'Ringkasan kondisi', labelEn: 'Condition summary', target: 'condition_notes' },
+  { key: 'visible_defects', label: 'Kekurangan terlihat', labelEn: 'Visible defects', target: 'defects' },
+  { key: 'seller_notes', label: 'Catatan untuk seller', labelEn: 'Seller notes', target: 'description' },
 ]
+
+export const SELLER_WORKSPACE_LINKS = [
+  ['/seller', 'Dashboard', '⌂'],
+  ['/seller/inventory', 'Inventory', '▣'],
+  ['/seller/inventory/new', 'Add item', '+'],
+  ['/seller/ai-hunter', 'AI Hunter', '✦'],
+  ['/seller/sourcing', 'Sourcing', '◌'],
+  ['/seller/listings', 'Listings', '↗'],
+  ['/seller/sales', 'Sales', '◎'],
+]
+
+export const ADMIN_WORKSPACE_LINKS = [
+  ['/seller/analytics', 'Analytics', '▤'],
+  ['/seller/ai-usage', 'AI Usage', '◒'],
+  ['/seller/users-roles', 'Users / Roles', '♙'],
+  ['/seller/marketplace-settings', 'Marketplace Settings', '↗'],
+  ['/seller/settings', 'AI Settings', '⚙'],
+  ['/seller/app-settings', 'App Settings', '⌘'],
+]
+
+export const ADMIN_ONLY_SECTIONS = ['analytics', 'ai-usage', 'users-roles', 'marketplace-settings', 'settings', 'app-settings']
+
+export function workspaceLinksForRole(role) {
+  return String(role || '').toUpperCase() === 'ADMIN'
+    ? [...SELLER_WORKSPACE_LINKS, ...ADMIN_WORKSPACE_LINKS]
+    : [...SELLER_WORKSPACE_LINKS]
+}
+
+export function canAccessWorkspaceSection(role, section) {
+  return !ADMIN_ONLY_SECTIONS.includes(section) || String(role || '').toUpperCase() === 'ADMIN'
+}
+
+export function workspacePathForLegacyAdmin(path) {
+  return path === '/admin' ? '/seller' : path
+}
 
 export function analysisSuggestionValue(result, key) {
   const value = result?.[key]
-  if (Array.isArray(value)) return value.filter(Boolean).join('; ')
+  if (Array.isArray(value)) {
+    const notes = key === 'seller_notes' ? value.filter((note) => !['authenticity_not_verified', 'manual verification required'].includes(String(note).toLowerCase())) : value
+    return notes.filter(Boolean).join('; ')
+  }
   return String(value || '').trim()
+}
+
+export function analysisBilingualValue(result, key) {
+  const primary = analysisSuggestionValue(result, key)
+  const rawEnglish = result?.[`${key}_en`]
+  const englishNotes = Array.isArray(rawEnglish) && key === 'seller_notes'
+    ? rawEnglish.filter((note) => !['authenticity_not_verified', 'manual verification required'].includes(String(note).toLowerCase()))
+    : rawEnglish
+  const english = Array.isArray(englishNotes) ? englishNotes.filter(Boolean).join('; ') : String(englishNotes || '').trim()
+  return { id: primary, en: english || primary }
 }
 
 export function applyItemAnalysisSuggestions(item, result, selectedKeys) {

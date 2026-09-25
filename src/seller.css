@@ -61,3 +61,59 @@
   .ai-analysis-actions .seller-primary{grid-column:1/-1}
   .ai-analysis-actions .seller-secondary{min-height:44px}
 }
+
+/* Clear, iPhone-friendly capture and gallery actions. */
+.photo-picker-copy{margin:-5px 0 14px;color:#97a69b;font-size:.73rem;line-height:1.5}
+.photo-picker-actions{display:grid;gap:8px;align-content:start}
+.photo-picker-input{position:absolute;width:1px;height:1px;overflow:hidden;opacity:0;pointer-events:none}
+.photo-picker-action{position:relative;display:grid;place-content:center;gap:3px;min-height:54px;padding:9px 12px;border:1px solid #456357;border-radius:5px;background:#17231c;color:#e8e2d4;text-align:center;font:inherit;cursor:pointer}
+.photo-picker-action.gallery{border-color:#4d695b;background:#1b2c22}
+.photo-picker-action span{font-size:.73rem;font-weight:900}
+.photo-picker-action small{color:#a0b0a4;font-size:.64rem}
+.photo-picker-action:focus-visible,.photo-preview button:focus-visible{outline:3px solid #79c5a5;outline-offset:2px}
+.photo-picker-action:disabled{opacity:.5;cursor:not-allowed}
+.photo-count{color:#a6b3a9;font-size:.67rem;line-height:1.5}
+.photo-count span{color:#7f8e83}
+.photo-picker-error{margin:0;color:#f0a18c;font-size:.68rem;line-height:1.45}
+.photo-preview-grid img{aspect-ratio:1;object-fit:contain!important;background:#080b09}
+.photo-preview button{width:40px;height:40px;top:5px;right:5px}
+.coming-soon-title{margin:12px 0 6px;color:#efe6d2;font:900 1.6rem/1.05 Georgia,'Times New Roman',serif}
+.seller-sidebar nav{min-height:0;overflow-y:auto;overscroll-behavior:contain}
+
+/* Bilingual analysis is a readable review surface, never an auto-apply form. */
+.ai-analysis-bg{z-index:120;overflow-y:auto}
+.ai-analysis-sheet{width:min(900px,100%);max-height:min(90vh,980px);overflow-y:auto;overscroll-behavior:contain;padding:22px}
+.ai-analysis-sheet .modal-head h2{line-height:1.12}
+.ai-analysis-sheet .modal-head h2 small{display:block;margin-top:5px;color:#a9b5ac;font-size:.72rem;font-weight:600;line-height:1.35;letter-spacing:0}
+.ai-review-section{display:grid;gap:9px;padding-top:13px;border-top:1px solid #29372f}
+.ai-review-section h3,.ai-authenticity-note h3{margin:0;color:#d7e0d7;font-size:.78rem;line-height:1.35}
+.ai-review-section h3 small,.ai-authenticity-note h3 small{color:#8fa096;font-size:.67rem;font-weight:600}
+.ai-review-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.ai-analysis-field{min-width:0;display:flex;align-items:flex-start;gap:9px;padding:11px;border:1px solid #2d3c33;background:#0d130f}
+.ai-analysis-field.selectable input{width:20px;min-width:20px;height:20px;margin:1px 0 0;accent-color:#55b493}
+.ai-analysis-field>span{min-width:0;display:grid;gap:5px}
+.ai-analysis-field b{color:#9dad9f;font-size:.66rem;line-height:1.4}
+.ai-analysis-field b small{display:block;color:#78887c;font-weight:600}
+.ai-analysis-field strong,.ai-analysis-field em{color:#ece5d8;font-size:.75rem;font-style:normal;line-height:1.45;overflow-wrap:anywhere}
+.ai-analysis-field em{color:#a9b7ac}
+.ai-marketplace-review article{display:grid;grid-template-columns:minmax(74px,100px) minmax(0,1fr);gap:10px;padding:10px;border:1px solid #2d3c33;background:#0d130f;font-size:.69rem;line-height:1.4}
+.ai-marketplace-review article>b{color:#d9e3da}
+.ai-marketplace-review article>span{display:grid;gap:4px;color:#c0cdc2}
+.ai-marketplace-review article small{color:#94a399;font-size:.66rem}
+.ai-marketplace-review article em{color:#81c5a0;font-size:.66rem;font-style:normal}
+.ai-authenticity-note{display:grid;gap:6px;padding:12px;border:1px solid #786132;background:#221d12}
+.ai-authenticity-note strong,.ai-authenticity-note>span{font-size:.72rem;line-height:1.45;overflow-wrap:anywhere}
+.ai-authenticity-note strong{color:#ebd49a}
+.ai-authenticity-note>span{color:#b9ad8a}
+.ai-confidence{margin:0;color:#93a196;font-size:.66rem}
+.ai-analysis-actions small{display:block;margin-top:3px;font-size:.59rem;letter-spacing:0}
+@media(max-width:700px){
+  .photo-picker-action{min-height:52px}
+  .photo-picker-actions{grid-template-columns:1fr 1fr}
+  .photo-count,.photo-picker-error{grid-column:1/-1}
+  .ai-analysis-bg{align-items:stretch;place-items:stretch;padding:env(safe-area-inset-top) 0 0}
+  .ai-analysis-sheet{width:100%;height:100%;max-height:none;border:0;border-radius:0;padding:16px 14px calc(14px + env(safe-area-inset-bottom))}
+  .ai-analysis-sheet .modal-head>button{width:44px;height:44px}
+  .ai-review-grid{grid-template-columns:1fr}
+  .ai-analysis-actions{position:sticky;bottom:0;margin:0 -14px;padding:10px 14px calc(10px + env(safe-area-inset-bottom));background:rgba(18,23,19,.97);backdrop-filter:blur(12px)}
+}

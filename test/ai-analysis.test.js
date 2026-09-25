@@ -1,8 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { analysisSuggestionValue, applyItemAnalysisSuggestions, ITEM_ANALYSIS_SUGGESTIONS } from '../src/seller-utils.js'
+import { readFile } from 'node:fs/promises'
+import { analysisBilingualValue, analysisSuggestionValue, applyItemAnalysisSuggestions, ITEM_ANALYSIS_SUGGESTIONS } from '../src/seller-utils.js'
 import { createItemAnalysisRequest } from '../supabase/functions/seller-ai/analysis-request.js'
 import { DEFAULT_MODEL, estimateCostIdr, modelPricing } from '../supabase/functions/seller-ai/pricing.ts'
+import { normalizeItemAnalysis } from '../supabase/functions/seller-ai/analysis-schema.ts'
 
 test('item analysis suggestions expose only approved product fields', () => {
   assert.deepEqual(ITEM_ANALYSIS_SUGGESTIONS.map(({ key }) => key), [
@@ -27,6 +29,39 @@ test('suggestions apply only after explicit field selection', () => {
   assert.equal(next.category, 'Outerwear')
   assert.equal(next.name, 'Existing title')
   assert.equal(next.defects, 'Seller note')
+})
+
+test('item analysis keeps Indonesian primary and English review values', () => {
+  const result = normalizeItemAnalysis({
+    suggested_title: 'Jaket kerja Stussy',
+    suggested_title_en: 'Stussy work jacket',
+    condition_summary: 'Kondisi baik dengan sedikit pemakaian',
+    condition_summary_en: 'Good condition with light wear',
+    visible_defects: ['Noda kecil di manset'],
+    visible_defects_en: ['Small cuff mark'],
+    authenticity_note: 'This item is authentic',
+    marketplace_recommendations: [{ marketplace: 'Grailed', recommendation: 'Sangat cocok', recommendation_en: 'Strong fit' }],
+  })
+  assert.deepEqual(analysisBilingualValue(result, 'suggested_title'), { id: 'Jaket kerja Stussy', en: 'Stussy work jacket' })
+  assert.deepEqual(analysisBilingualValue(result, 'visible_defects'), { id: 'Noda kecil di manset', en: 'Small cuff mark' })
+  assert.equal(result.authenticity_note, 'Keaslian belum diverifikasi. Perlu pemeriksaan manual.')
+  assert.equal(result.authenticity_note_en, 'Authenticity not verified. Manual verification required.')
+  assert.equal(result.marketplace_recommendations.find(({ marketplace }) => marketplace === 'Grailed').recommendation, 'Sangat cocok')
+})
+
+test('authenticity cautions are never applied as seller description suggestions', () => {
+  const result = { seller_notes: ['Condition looks clean', 'authenticity_not_verified', 'manual verification required'] }
+  assert.equal(analysisSuggestionValue(result, 'seller_notes'), 'Condition looks clean')
+  assert.equal(analysisBilingualValue(result, 'seller_notes').en, 'Condition looks clean')
+})
+
+test('ITEM_ANALYSIS still finalizes token/cost usage before returning results', async () => {
+  const source = await readFile(new URL('../supabase/functions/seller-ai/index.ts', import.meta.url), 'utf8')
+  assert.match(source, /feature:\s*'ITEM_ANALYSIS'/)
+  assert.match(source, /finalize_ai_usage/)
+  assert.match(source, /p_input_tokens:\s*tokens\.input/)
+  assert.match(source, /p_output_tokens:\s*tokens\.output/)
+  assert.match(source, /p_estimated_cost:\s*actualCost/)
 })
 
 test('Responses request pins GPT-6 Luna and low reasoning without sampling options', () => {

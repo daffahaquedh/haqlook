@@ -1,11 +1,13 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createClient } from '@supabase/supabase-js'
 import {
   budgetLabel,
   budgetTone,
   calculateProfit,
   analysisSuggestionValue,
+  analysisBilingualValue,
   applyItemAnalysisSuggestions,
+  canAccessWorkspaceSection,
   INVENTORY_STATUSES,
   ITEM_ANALYSIS_SUGGESTIONS,
   LISTING_STATUSES,
@@ -13,7 +15,17 @@ import {
   moneyIdr,
   safeHttpUrl,
   titleCaseStatus,
+  workspaceLinksForRole,
+  workspacePathForLegacyAdmin,
 } from './seller-utils'
+import {
+  CAMERA_PICKER_PROPS,
+  GALLERY_PICKER_PROPS,
+  MAX_PRODUCT_PHOTOS,
+  prepareProductPhoto,
+  productPhotoExtension,
+  takeAvailablePhotos,
+} from './seller-photos'
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
@@ -108,8 +120,14 @@ function SellerLogin() {
 }
 
 function SellerWorkspace({ path, profile, onLogout }) {
-  const [section, id, subSection] = path.replace(/^\/seller\/?/, '').split('/')
+  const workspacePath = workspacePathForLegacyAdmin(path)
+  const [section, id, subSection] = workspacePath.replace(/^\/seller\/?/, '').split('/')
+  useEffect(() => {
+    if (path === '/admin' && profile.role !== 'ADMIN') go('/seller')
+  }, [path, profile.role])
   let page = <SellerDashboard profile={profile} />
+  if (!canAccessWorkspaceSection(profile.role, section)) page = <AccessDenied />
+  else if (section === 'analytics') page = <SellerDashboard profile={profile} analytics />
   if (section === 'inventory' && id === 'new') page = <NewInventory />
   else if (section === 'inventory' && id && subSection === 'edit') page = <EditInventory id={id} />
   else if (section === 'inventory' && id) page = <InventoryDetail id={id} />
@@ -118,35 +136,31 @@ function SellerWorkspace({ path, profile, onLogout }) {
   else if (section === 'sourcing') page = <SourcingPage />
   else if (section === 'listings') page = <ListingsPage />
   else if (section === 'sales') page = <SalesPage />
-  else if (section === 'ai-usage') page = <AIUsagePage />
-  else if (section === 'settings') page = profile.role === 'ADMIN' ? <SettingsPage /> : <AccessDenied />
-  return <main className="seller-app"><SellerSidebar path={path} profile={profile} onLogout={onLogout} /><section className="seller-content">{page}</section><SellerMobileNav path={path} profile={profile} onLogout={onLogout} /></main>
+  else if (section === 'ai-usage' && profile.role === 'ADMIN') page = <AIUsagePage />
+  else if (section === 'settings' && profile.role === 'ADMIN') page = <SettingsPage />
+  else if (['users-roles', 'marketplace-settings', 'app-settings'].includes(section) && profile.role === 'ADMIN') {
+    const titles = { 'users-roles': 'Users / Roles', 'marketplace-settings': 'Marketplace Settings', 'app-settings': 'App Settings' }
+    page = <ComingSoonPage title={titles[section]} />
+  }
+  if (path === '/admin' && profile.role !== 'ADMIN') page = <AccessDenied />
+  return <main className="seller-app"><SellerSidebar path={workspacePath} profile={profile} onLogout={onLogout} /><section className="seller-content">{page}</section><SellerMobileNav path={workspacePath} profile={profile} onLogout={onLogout} /></main>
 }
 
 function SellerSidebar({ path, profile, onLogout }) {
-  const links = [
-    ['/seller', 'Dashboard', '⌂'],
-    ['/seller/inventory', 'Inventory', '▣'],
-    ['/seller/inventory/new', 'Add item', '+'],
-    ['/seller/ai-hunter', 'AI Hunter', '✦'],
-    ['/seller/sourcing', 'Sourcing', '◌'],
-    ['/seller/listings', 'Listings', '↗'],
-    ['/seller/sales', 'Sales', '◎'],
-    ['/seller/ai-usage', 'AI Usage', '◒'],
-  ]
-  if (profile.role === 'ADMIN') links.push(['/seller/settings', 'Settings', '⚙'])
-  return <aside className="seller-sidebar"><div className="seller-brand"><img src="/mascot-latest.png" alt="" /><div><strong>HAQLOOKS</strong><span>SELLER PANEL</span></div></div><nav>{links.map(([href, label, icon]) => <a key={href} href={href} className={(href === '/seller' ? path === href : path.startsWith(href)) ? 'active' : ''} onClick={(event) => { event.preventDefault(); go(href) }}><i>{icon}</i><span>{label}</span></a>)}</nav><div className="seller-user"><span className="role-pill">{profile.role}</span><small>{profile.email || 'Authenticated seller'}</small><button type="button" onClick={onLogout}>↪ Sign out</button></div></aside>
+  const links = workspaceLinksForRole(profile.role)
+  return <aside className="seller-sidebar"><div className="seller-brand"><img src="/mascot-latest.png" alt="" /><div><strong>HAQLOOKS</strong><span>{profile.role === 'ADMIN' ? 'ADMIN WORKSPACE' : 'SELLER WORKSPACE'}</span></div></div><nav aria-label={`${profile.role} workspace`}>{links.map(([href, label, icon]) => <a key={href} href={href} className={(href === '/seller' ? path === href : href === '/seller/inventory' ? path.startsWith(href) && path !== '/seller/inventory/new' : path.startsWith(href)) ? 'active' : ''} onClick={(event) => { event.preventDefault(); go(href) }}><i>{icon}</i><span>{label}</span></a>)}</nav><div className="seller-user"><span className="role-pill">{profile.role}</span><small>{profile.email || 'Authenticated seller'}</small><button type="button" onClick={onLogout}>↪ Sign out</button></div></aside>
 }
 
 function SellerMobileNav({ path, profile, onLogout }) {
   const [moreOpen, setMoreOpen] = useState(false)
   const primary = [['/seller', 'Home', '⌂'], ['/seller/inventory', 'Inventory', '▣'], ['/seller/inventory/new', 'Add', '+'], ['/seller/ai-hunter', 'Hunter', '✦']]
-  const more = [['/seller/sourcing', 'Sourcing', '◌'], ['/seller/listings', 'Listings', '↗'], ['/seller/sales', 'Sales', '◎'], ['/seller/ai-usage', 'AI Usage', '◒']]
-  if (profile.role === 'ADMIN') more.push(['/seller/settings', 'Settings', '⚙'])
+  const more = profile.role === 'ADMIN'
+    ? [...workspaceLinksForRole(profile.role).slice(4)]
+    : [...workspaceLinksForRole(profile.role).slice(4)]
   const isActive = (href) => href === '/seller' ? path === href : href === '/seller/inventory/new' ? path === href : href === '/seller/inventory' ? path.startsWith(href) && path !== '/seller/inventory/new' : path.startsWith(href)
   function navigate(href) { setMoreOpen(false); go(href) }
   return <>
-    {moreOpen && <div className="seller-more-sheet" role="dialog" aria-label="More seller tools"><div className="seller-more-head"><strong>More tools</strong><button type="button" aria-label="Close more menu" onClick={() => setMoreOpen(false)}>×</button></div>{more.map(([href, label, icon]) => <a key={href} href={href} className={isActive(href) ? 'active' : ''} onClick={(event) => { event.preventDefault(); navigate(href) }}><i>{icon}</i><span>{label}</span></a>)}<button type="button" className="seller-more-logout" onClick={onLogout}>↪ Sign out</button></div>}
+    {moreOpen && <div className="seller-more-sheet" role="dialog" aria-label={profile.role === 'ADMIN' ? 'More admin tools' : 'More seller tools'}><div className="seller-more-head"><strong>{profile.role === 'ADMIN' ? 'More admin tools' : 'More seller tools'}</strong><button type="button" aria-label="Close more menu" onClick={() => setMoreOpen(false)}>×</button></div>{more.map(([href, label, icon]) => <a key={href} href={href} className={isActive(href) ? 'active' : ''} onClick={(event) => { event.preventDefault(); navigate(href) }}><i>{icon}</i><span>{label}</span></a>)}<button type="button" className="seller-more-logout" onClick={onLogout}>↪ Sign out</button></div>}
     <nav className="seller-mobile-nav" aria-label="Seller navigation">{primary.map(([href, label, icon]) => <a key={href} href={href} className={`${isActive(href) ? 'active' : ''} ${label === 'Add' ? 'add' : ''}`} onClick={(event) => { event.preventDefault(); navigate(href) }}><i>{icon}</i><span>{label}</span></a>)}<button type="button" className={moreOpen || more.some(([href]) => isActive(href)) ? 'active' : ''} onClick={() => setMoreOpen((value) => !value)}><i>•••</i><span>More</span></button></nav>
   </>
 }
@@ -158,8 +172,9 @@ function SellerHeader({ eyebrow, title, copy, action }) {
 function SellerLoading({ text }) { return <main className="seller-loading"><span className="seller-spinner" /><p>{text}</p></main> }
 function Notice({ children, tone = 'info' }) { return <div className={`seller-notice ${tone}`}>{children}</div> }
 function AccessDenied() { return <div className="seller-empty"><strong>ADMIN ACCESS REQUIRED</strong><p>This area is limited to ADMIN accounts.</p></div> }
+function ComingSoonPage({ title }) { return <div><SellerHeader eyebrow="ADMIN / MANAGEMENT" title={title} copy="Fondasi pengelolaan ini belum tersedia. Tidak ada perubahan yang dilakukan di sini." /><section className="seller-panel"><span className="seller-kicker">COMING SOON / BELUM TERSEDIA</span><h2 className="coming-soon-title">Belum tersedia</h2><p className="seller-muted">Backend dan kontrol akses untuk halaman ini belum disiapkan. Halaman ini hanya penanda status, bukan fitur yang berfungsi.</p></section></div> }
 
-function SellerDashboard() {
+function SellerDashboard({ profile, analytics = false }) {
   const [summary, setSummary] = useState(null)
   const [ai, setAi] = useState(null)
   const [watchlist, setWatchlist] = useState([])
@@ -181,7 +196,7 @@ function SellerDashboard() {
 
   const stats = summary || { total_stock: 0, available: 0, draft: 0, reserved: 0, sold: 0, total_modal_active: 0, estimated_stock_value: 0, revenue: 0, gross_profit: 0, net_profit: 0 }
   const tone = budgetTone(ai?.used || 0, ai?.budget || 0)
-  return <div><SellerHeader eyebrow="OPERATIONS / OVERVIEW" title="Good morning, seller." copy="Your master inventory is the source of truth for every channel." action={<a href="/seller/inventory/new" className="seller-primary compact" onClick={(event) => { event.preventDefault(); go('/seller/inventory/new') }}>＋ Add item</a>} />{message && <Notice tone="warning">{message}</Notice>}<section className="seller-stat-grid"><Stat label="Total stock" value={stats.total_stock} /><Stat label="Available" value={stats.available} tone="green" /><Stat label="Draft" value={stats.draft} tone="muted" /><Stat label="Reserved" value={stats.reserved} tone="yellow" /><Stat label="Sold" value={stats.sold} tone="red" /></section><section className="seller-finance-grid"><Metric label="Modal active" value={moneyIdr(stats.total_modal_active)} /><Metric label="Estimated stock value" value={moneyIdr(stats.estimated_stock_value)} /><Metric label="Revenue" value={moneyIdr(stats.revenue)} /><Metric label="Gross profit" value={moneyIdr(stats.gross_profit)} /><Metric label="Net profit" value={moneyIdr(stats.net_profit)} /></section><div className="seller-two-col"><section className="seller-panel"><PanelTitle eyebrow="AI BUDGET" title="Monthly usage" href="/seller/ai-usage" /><div className="budget-row"><strong>{moneyIdr(ai?.used || 0)}</strong><span>of {moneyIdr(ai?.budget || 100000)}</span></div><div className="budget-track"><span className={tone} style={{ width: `${Math.min(ai?.percentage || 0, 100)}%` }} /></div><div className="budget-foot"><span className={`budget-state ${tone}`}>{budgetLabel(ai?.used || 0, ai?.budget || 100000)}</span><span>{Math.round(ai?.percentage || 0)}%</span></div>{!AI_ENABLED && <p className="muted-note">AI belum dikonfigurasi. Usage stays at zero until the server-side function is enabled.</p>}</section><section className="seller-panel"><PanelTitle eyebrow="SOURCING WATCHLIST" title="Candidates to review" href="/seller/sourcing" />{watchlist.length ? watchlist.map((candidate) => <CandidateRow key={candidate.id} candidate={candidate} />) : <p className="seller-muted">No sourcing candidates yet.</p>}</section></div></div>
+  return <div><SellerHeader eyebrow={analytics ? 'ADMIN / BUSINESS ANALYTICS' : `${profile?.role || 'SELLER'} / OVERVIEW`} title={analytics ? 'Analytics' : profile?.role === 'ADMIN' ? 'Operations dashboard.' : 'Good morning, seller.'} copy="Your master inventory is the source of truth for every channel." action={<a href="/seller/inventory/new" className="seller-primary compact" onClick={(event) => { event.preventDefault(); go('/seller/inventory/new') }}>＋ Add item</a>} />{message && <Notice tone="warning">{message}</Notice>}<section className="seller-stat-grid"><Stat label="Total stock" value={stats.total_stock} /><Stat label="Available" value={stats.available} tone="green" /><Stat label="Draft" value={stats.draft} tone="muted" /><Stat label="Reserved" value={stats.reserved} tone="yellow" /><Stat label="Sold" value={stats.sold} tone="red" /></section><section className="seller-finance-grid"><Metric label="Modal active" value={moneyIdr(stats.total_modal_active)} /><Metric label="Estimated stock value" value={moneyIdr(stats.estimated_stock_value)} /><Metric label="Revenue" value={moneyIdr(stats.revenue)} /><Metric label="Gross profit" value={moneyIdr(stats.gross_profit)} /><Metric label="Net profit" value={moneyIdr(stats.net_profit)} /></section><div className="seller-two-col"><section className="seller-panel"><PanelTitle eyebrow="AI BUDGET" title="Monthly usage" href={profile?.role === 'ADMIN' ? '/seller/ai-usage' : undefined} /><div className="budget-row"><strong>{moneyIdr(ai?.used || 0)}</strong><span>of {moneyIdr(ai?.budget || 100000)}</span></div><div className="budget-track"><span className={tone} style={{ width: `${Math.min(ai?.percentage || 0, 100)}%` }} /></div><div className="budget-foot"><span className={`budget-state ${tone}`}>{budgetLabel(ai?.used || 0, ai?.budget || 100000)}</span><span>{Math.round(ai?.percentage || 0)}%</span></div>{!AI_ENABLED && <p className="muted-note">AI belum dikonfigurasi. Usage stays at zero until the server-side function is enabled.</p>}</section><section className="seller-panel"><PanelTitle eyebrow="SOURCING WATCHLIST" title="Candidates to review" href="/seller/sourcing" />{watchlist.length ? watchlist.map((candidate) => <CandidateRow key={candidate.id} candidate={candidate} />) : <p className="seller-muted">No sourcing candidates yet.</p>}</section></div></div>
 }
 
 function Stat({ label, value, tone = '' }) { return <div className={`seller-stat ${tone}`}><span>{label}</span><strong>{value}</strong></div> }
@@ -212,24 +227,52 @@ function InventoryCard({ item }) { return <a href={`/seller/inventory/${item.id}
 
 function NewInventory() {
   const [form, setForm] = useState({ brand: '', name: '', category: '', subcategory: '', size_label: '', condition: 'Good', condition_notes: '', defects: '', purchase_price: '', suggested_price: '', minimum_price: '', source: '', source_url: '', purchase_date: today(), status: 'draft', description: '' })
-  const [files, setFiles] = useState([]); const [previews, setPreviews] = useState([]); const [message, setMessage] = useState(''); const [busy, setBusy] = useState(false)
+  const [photos, setPhotos] = useState([]); const photosRef = useRef([])
+  const [message, setMessage] = useState(''); const [photoMessage, setPhotoMessage] = useState(''); const [photoBusy, setPhotoBusy] = useState(false); const [busy, setBusy] = useState(false)
+  const cameraPicker = useRef(null); const galleryPicker = useRef(null)
   function set(key, value) { setForm((current) => ({ ...current, [key]: value })) }
-  function chooseFiles(event) {
-    const picked = [...event.target.files].slice(0, 10)
-    setFiles(picked); setPreviews(picked.map((file) => URL.createObjectURL(file)))
-    if (event.target.files.length > 10) setMessage('Only the first 10 images were selected.')
+  function replacePhotos(next) {
+    const keep = new Set(next.map((photo) => photo.preview))
+    photosRef.current.forEach((photo) => { if (!keep.has(photo.preview)) URL.revokeObjectURL(photo.preview) })
+    photosRef.current = next
+    setPhotos(next)
   }
-  function removeFile(index) {
-    setFiles((current) => current.filter((_, currentIndex) => currentIndex !== index))
-    setPreviews((current) => { const next = current.filter((_, currentIndex) => currentIndex !== index); if (current[index]) URL.revokeObjectURL(current[index]); return next })
+  useEffect(() => () => photosRef.current.forEach((photo) => URL.revokeObjectURL(photo.preview)), [])
+
+  async function chooseFiles(event) {
+    const input = event.currentTarget
+    const selected = [...(input.files || [])]
+    input.value = ''
+    setPhotoMessage('')
+    if (!selected.length) return
+
+    const { files: available, omitted } = takeAvailablePhotos(photosRef.current.length, selected)
+    const limitMessage = omitted ? `Maksimal ${MAX_PRODUCT_PHOTOS} foto. ${omitted} foto tidak ditambahkan.` : ''
+    if (limitMessage) setPhotoMessage(limitMessage)
+    if (!available.length) return
+
+    setPhotoBusy(true)
+    const prepared = []; const errors = []
+    for (const candidate of available) {
+      try { prepared.push(await prepareProductPhoto(candidate)) }
+      catch (error) { errors.push(error.message || 'Foto tidak dapat diproses.') }
+    }
+    const additions = prepared.map((file) => ({ id: crypto.randomUUID(), file, preview: URL.createObjectURL(file) }))
+    replacePhotos([...photosRef.current, ...additions])
+    if (errors.length) setPhotoMessage([limitMessage, ...errors].filter(Boolean).join(' '))
+    setPhotoBusy(false)
+  }
+
+  function removePhoto(photoId) {
+    replacePhotos(photosRef.current.filter((photo) => photo.id !== photoId))
   }
   async function upload() {
     const urls = []
-    for (const file of files) {
-      if (!file.type.startsWith('image/') || file.size > 8 * 1024 * 1024) throw new Error('Each image must be an image file up to 8 MB.')
-      const extension = file.name.split('.').pop()?.toLowerCase() || 'jpg'
+    for (const { file } of photosRef.current) {
+      const extension = productPhotoExtension(file)
       const path = `inventory/${crypto.randomUUID()}.${extension}`
-      const { error } = await supabase.storage.from('product-images').upload(path, file, { upsert: false, contentType: file.type })
+      const contentType = file.type || (extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : 'image/jpeg')
+      const { error } = await supabase.storage.from('product-images').upload(path, file, { upsert: false, contentType })
       if (error) throw error
       urls.push(supabase.storage.from('product-images').getPublicUrl(path).data.publicUrl)
     }
@@ -237,6 +280,7 @@ function NewInventory() {
   }
   async function save(event) {
     event.preventDefault(); setMessage('')
+    if (photoBusy) return
     if (!supabase) { setMessage('Supabase is not configured.'); return }
     if (form.source_url && !safeHttpUrl(form.source_url)) { setMessage('Source URL must use http:// or https://.'); return }
     setBusy(true)
@@ -249,7 +293,19 @@ function NewInventory() {
     } catch (error) { setMessage(errorText(error, 'Unable to save this item.')) }
     setBusy(false)
   }
-  return <div><SellerHeader eyebrow="MASTER DATABASE / NEW ITEM" title="Add item" copy="Capture the item in HAQLOOKS before analysing or distributing it." action={<button className="seller-secondary compact" type="button" onClick={() => go('/seller/inventory')}>Cancel</button>} />{message && <Notice tone="error">{message}</Notice>}<form className="seller-form" onSubmit={save}><section className="seller-panel"><PanelTitle eyebrow="01 / PHOTOS" title="Product photos" /><div className="photo-uploader"><div className="photo-preview-grid">{previews.length ? previews.map((src, index) => <div className="photo-preview" key={src}><img src={src} alt={`Preview ${index + 1}`} /><button type="button" aria-label={`Remove photo ${index + 1}`} onClick={() => removeFile(index)}>×</button></div>) : <div className="photo-empty"><strong>1–10 photos</strong><span>Clear, well-lit product images work best.</span></div>}</div><label className="upload-button"><input type="file" accept="image/png,image/jpeg,image/webp" capture="environment" multiple onChange={chooseFiles} />＋ Choose photos</label></div></section><section className="seller-panel"><PanelTitle eyebrow="02 / IDENTITY" title="Basic information" /><div className="seller-fields two"><Field label="Brand" value={form.brand} onChange={(value) => set('brand', value)} required placeholder="Stussy" /><Field label="Item name" value={form.name} onChange={(value) => set('name', value)} required placeholder="Work Jacket" /><Field label="Category" value={form.category} onChange={(value) => set('category', value)} placeholder="Jackets" /><Field label="Subcategory" value={form.subcategory} onChange={(value) => set('subcategory', value)} placeholder="Workwear" /><Field label="Size" value={form.size_label} onChange={(value) => set('size_label', value)} placeholder="L / 42" /><Field label="Condition" value={form.condition} onChange={(value) => set('condition', value)} placeholder="Excellent" /><Field label="Condition notes" value={form.condition_notes} onChange={(value) => set('condition_notes', value)} placeholder="Light wear on cuff" /><Field label="Defects / minus" value={form.defects} onChange={(value) => set('defects', value)} placeholder="None" /></div></section><section className="seller-panel"><PanelTitle eyebrow="03 / MONEY" title="Capital & pricing" /><div className="seller-fields three"><Field label="Purchase price" value={form.purchase_price} onChange={(value) => set('purchase_price', value)} type="number" required placeholder="750000" /><Field label="Suggested price" value={form.suggested_price} onChange={(value) => set('suggested_price', value)} type="number" placeholder="2250000" /><Field label="Minimum price" value={form.minimum_price} onChange={(value) => set('minimum_price', value)} type="number" placeholder="1900000" /></div></section><section className="seller-panel"><PanelTitle eyebrow="04 / SOURCE" title="Where it came from" /><div className="seller-fields two"><Field label="Source" value={form.source} onChange={(value) => set('source', value)} placeholder="Hunting / seller name" /><Field label="Source URL" value={form.source_url} onChange={(value) => set('source_url', value)} placeholder="https://…" /><Field label="Purchase date" value={form.purchase_date} onChange={(value) => set('purchase_date', value)} type="date" /><label>Status<select value={form.status} onChange={(event) => set('status', event.target.value)}><option value="draft">Save as draft</option><option value="available">Save & available</option></select></label><Field label="Description" value={form.description} onChange={(value) => set('description', value)} textarea placeholder="The customer-facing story for this item…" /></div></section><div className="seller-form-actions"><button className="seller-primary" disabled={busy}>{busy ? 'SAVING…' : form.status === 'available' ? 'SAVE & AVAILABLE →' : 'SAVE AS DRAFT →'}</button><button type="button" className="seller-secondary" onClick={() => go('/seller/inventory')}>Cancel</button></div></form></div>
+  return <div><SellerHeader eyebrow="MASTER DATABASE / NEW ITEM" title="Add item" copy="Capture the item in HAQLOOKS before analysing or distributing it." action={<button className="seller-secondary compact" type="button" onClick={() => go('/seller/inventory')}>Cancel</button>} />{message && <Notice tone="error">{message}</Notice>}<form className="seller-form" onSubmit={save}>
+    <section className="seller-panel"><PanelTitle eyebrow="01 / FOTO BARANG" title="Product photos" /><p className="photo-picker-copy">Ambil foto atau pilih beberapa foto produk dari galeri. Detail label, jahitan, motif, dan kondisi tetap penting.</p><div className="photo-uploader"><div className="photo-preview-grid">{photos.length ? photos.map((photo, index) => <div className="photo-preview" key={photo.id}><img src={photo.preview} alt={`Product photo preview ${index + 1}`} /><button type="button" aria-label={`Remove photo ${index + 1}`} onClick={() => removePhoto(photo.id)}>×</button></div>) : <div className="photo-empty"><strong>Belum ada foto / No photos yet</strong><span>Foto terang dan tajam membantu memeriksa tag, stitching, print, serta defect.</span></div>}</div><div className="photo-picker-actions">
+      <input className="photo-picker-input" {...CAMERA_PICKER_PROPS} ref={cameraPicker} aria-label="Take a product photo" tabIndex={-1} onChange={chooseFiles} />
+      <input className="photo-picker-input" {...GALLERY_PICKER_PROPS} ref={galleryPicker} aria-label="Choose product photos from gallery" tabIndex={-1} onChange={chooseFiles} />
+      <button className="photo-picker-action" type="button" onClick={() => cameraPicker.current?.click()} disabled={photoBusy || photos.length >= MAX_PRODUCT_PHOTOS}><span>📷 Ambil Foto</span><small>Take Photo</small></button>
+      <button className="photo-picker-action gallery" type="button" onClick={() => galleryPicker.current?.click()} disabled={photoBusy || photos.length >= MAX_PRODUCT_PHOTOS}><span>🖼 Pilih dari Galeri</span><small>Choose from Gallery</small></button>
+      <div className="photo-count" aria-live="polite">{photos.length} / {MAX_PRODUCT_PHOTOS} foto dipilih <span>/ photos selected</span>{photoBusy && <b> · Memproses foto… / Processing…</b>}</div>
+      {photoMessage && <p className="photo-picker-error" role="alert">{photoMessage}</p>}
+    </div></div></section>
+    <section className="seller-panel"><PanelTitle eyebrow="02 / IDENTITY" title="Basic information" /><div className="seller-fields two"><Field label="Brand" value={form.brand} onChange={(value) => set('brand', value)} required placeholder="Stussy" /><Field label="Item name" value={form.name} onChange={(value) => set('name', value)} required placeholder="Work Jacket" /><Field label="Category" value={form.category} onChange={(value) => set('category', value)} placeholder="Jackets" /><Field label="Subcategory" value={form.subcategory} onChange={(value) => set('subcategory', value)} placeholder="Workwear" /><Field label="Size" value={form.size_label} onChange={(value) => set('size_label', value)} placeholder="L / 42" /><Field label="Condition" value={form.condition} onChange={(value) => set('condition', value)} placeholder="Excellent" /><Field label="Condition notes" value={form.condition_notes} onChange={(value) => set('condition_notes', value)} placeholder="Light wear on cuff" /><Field label="Defects / minus" value={form.defects} onChange={(value) => set('defects', value)} placeholder="None" /></div></section>
+    <section className="seller-panel"><PanelTitle eyebrow="03 / MONEY" title="Capital & pricing" /><div className="seller-fields three"><Field label="Purchase price" value={form.purchase_price} onChange={(value) => set('purchase_price', value)} type="number" required placeholder="750000" /><Field label="Suggested price" value={form.suggested_price} onChange={(value) => set('suggested_price', value)} type="number" placeholder="2250000" /><Field label="Minimum price" value={form.minimum_price} onChange={(value) => set('minimum_price', value)} type="number" placeholder="1900000" /></div></section>
+    <section className="seller-panel"><PanelTitle eyebrow="04 / SOURCE" title="Where it came from" /><div className="seller-fields two"><Field label="Source" value={form.source} onChange={(value) => set('source', value)} placeholder="Hunting / seller name" /><Field label="Source URL" value={form.source_url} onChange={(value) => set('source_url', value)} placeholder="https://…" /><Field label="Purchase date" value={form.purchase_date} onChange={(value) => set('purchase_date', value)} type="date" /><label>Status<select value={form.status} onChange={(event) => set('status', event.target.value)}><option value="draft">Save as draft</option><option value="available">Save & available</option></select></label><Field label="Description" value={form.description} onChange={(value) => set('description', value)} textarea placeholder="The customer-facing story for this item…" /></div></section>
+    <div className="seller-form-actions"><button className="seller-primary" disabled={busy || photoBusy}>{busy ? 'SAVING…' : form.status === 'available' ? 'SAVE & AVAILABLE →' : 'SAVE AS DRAFT →'}</button><button type="button" className="seller-secondary" onClick={() => go('/seller/inventory')}>Cancel</button></div></form></div>
 }
 
 function Field({ label, value, onChange, type = 'text', placeholder, required = false, textarea = false, name }) { return <label>{label}{textarea ? <textarea name={name} value={value} onChange={onChange ? (event) => onChange(event.target.value) : undefined} placeholder={placeholder} rows="4" required={required} /> : <input name={name} type={type} value={value} onChange={onChange ? (event) => onChange(event.target.value) : undefined} placeholder={placeholder} required={required} />}</label> }
@@ -306,7 +362,76 @@ function InventoryDetail({ id }) {
   }
   if (!item) return message ? <div className="seller-empty"><strong>{message}</strong><button className="seller-secondary" onClick={() => go('/seller/inventory')}>Back to inventory</button></div> : <SellerLoading text="Loading item…" />
   const activeListings = listings.filter((listing) => ['LISTED', 'DRAFT'].includes(listing.listing_status) && listing.marketplace !== sales[0]?.sold_via)
-  return <div><a className="seller-back-link" href="/seller/inventory" onClick={(event) => { event.preventDefault(); go('/seller/inventory') }}>← Back to inventory</a><SellerHeader eyebrow={`${item.sku || 'SKU pending'} / INVENTORY DETAIL`} title={`${item.brand} ${item.name}`} copy={`${item.size_label || 'Size not set'} · ${item.condition || 'Condition not set'} · added ${dateLabel(item.created_at)}`} action={<div className="seller-header-actions"><button type="button" className="seller-secondary compact seller-ai-button" onClick={analyzeItem} aria-disabled={!AI_ENABLED}>{analysisBusy ? 'ANALYZING…' : '✦ AI ANALYZE'}</button><a className="seller-secondary compact" href={`/seller/inventory/${id}/edit`} onClick={(event) => { event.preventDefault(); go(`/seller/inventory/${id}/edit`) }}>Edit item</a><span className={`inventory-status large ${item.status}`}>{titleCaseStatus(item.status)}</span></div>} />{message && <Notice tone={message.startsWith('Sold recorded') ? 'success' : 'warning'}>{message}</Notice>}{analysisMessage && <Notice tone="info">{analysisMessage}</Notice>}<div className="detail-grid"><section><div className="detail-hero"><img src={imageFor(item)} alt="" /><div><span>Purchase price</span><strong>{moneyIdr(item.purchase_price)}</strong><span>Suggested / minimum</span><b>{moneyIdr(item.suggested_price || item.price_idr)} / {moneyIdr(item.minimum_price)}</b></div></div><section className="seller-panel"><PanelTitle eyebrow="LISTING TRACKER" title="Marketplace status" /><div className="listing-stack">{MARKETPLACES.map((marketplace) => { const listing = listings.find((entry) => entry.marketplace === marketplace.key) || { marketplace: marketplace.key, listing_status: 'NOT_LISTED', listed_price: item.suggested_price || item.price_idr, listing_url: '' }; return <ListingRow key={marketplace.key} listing={listing} label={marketplace.label} onEdit={() => setEditingListing({ ...listing })} /> })}</div></section></section><aside className="detail-side"><section className="seller-panel"><PanelTitle eyebrow="MASTER DATA" title="Item facts" /><dl className="seller-dl"><div><dt>Category</dt><dd>{item.category || '—'}</dd></div><div><dt>Source</dt><dd>{item.source || '—'}</dd></div><div><dt>Purchase date</dt><dd>{dateLabel(item.purchase_date)}</dd></div><div><dt>Defects</dt><dd>{item.defects || 'None noted'}</dd></div></dl>{item.source_url && <a className="seller-text-link" href={item.source_url} target="_blank" rel="noreferrer">Open source URL ↗</a>}</section>{item.status !== 'sold' && <button className="seller-danger-button" type="button" onClick={() => setShowSold(true)}>MARK AS SOLD</button>}{item.status === 'sold' && <section className="seller-panel"><PanelTitle eyebrow="SALE" title="Profit recorded" />{sales[0] ? <div className="profit-box"><span>Sold via {titleCaseStatus(sales[0].sold_via)}</span><strong>{moneyIdr(sales[0].sale_price)}</strong><p>Gross {moneyIdr(sales[0].gross_profit)} · Net {moneyIdr(sales[0].net_profit)}</p></div> : <p className="seller-muted">Sale details unavailable.</p>}</section>}</aside></div>{item.status === 'sold' && activeListings.length > 0 && <Notice tone="warning">⚠ This item is still listed on: {activeListings.map((listing) => titleCaseStatus(listing.marketplace)).join(', ')}. Remove or update those listings manually.</Notice>}{editingListing && <div className="seller-modal-bg"><form className="seller-modal" onSubmit={saveListing}><div className="modal-head"><h2>{titleCaseStatus(editingListing.marketplace)} listing</h2><button type="button" onClick={() => setEditingListing(null)}>×</button></div><label>Status<select value={editingListing.listing_status} onChange={(event) => setEditingListing({ ...editingListing, listing_status: event.target.value })}>{LISTING_STATUSES.map((status) => <option key={status} value={status}>{titleCaseStatus(status)}</option>)}</select></label><label>Listed price<input type="number" value={editingListing.listed_price || ''} onChange={(event) => setEditingListing({ ...editingListing, listed_price: event.target.value })} /></label><label>Listing URL<input value={editingListing.listing_url || ''} onChange={(event) => setEditingListing({ ...editingListing, listing_url: event.target.value })} placeholder="https://…" /></label><div className="seller-form-actions"><button className="seller-primary">Save listing</button><button type="button" className="seller-secondary" onClick={() => setEditingListing(null)}>Cancel</button></div></form></div>}{analysis && <div className="seller-modal-bg ai-analysis-bg"><section className="seller-modal ai-analysis-sheet" role="dialog" aria-modal="true" aria-labelledby="ai-analysis-title"><div className="modal-head"><div><span className="seller-kicker">ITEM ANALYSIS / REVIEW</span><h2 id="ai-analysis-title">Review AI suggestions</h2></div><button type="button" aria-label="Close analysis" onClick={() => setAnalysis(null)}>×</button></div><p className="seller-muted">AI suggestions never overwrite the item automatically. Review each field and apply only what you approve.</p><div className="ai-suggestion-list">{ITEM_ANALYSIS_SUGGESTIONS.map(({ key, label }) => { const value = analysisSuggestionValue(analysis.result, key); return <label className="ai-suggestion" key={key}><input type="checkbox" checked={Boolean(selectedSuggestions[key])} onChange={(event) => setSelectedSuggestions((current) => ({ ...current, [key]: event.target.checked }))} disabled={!value} /><span><b>{label}</b><strong>{value || 'No suggestion'}</strong></span></label> })}</div><section className="ai-marketplace-review"><span className="seller-kicker">MARKETPLACE NOTES</span>{(analysis.result.marketplace_recommendations || []).map((entry) => <div key={entry.marketplace}><b>{entry.marketplace}</b><span>{entry.recommendation}{entry.listing_angle ? ` · ${entry.listing_angle}` : ''}</span></div>)}</section><section className="ai-notes"><span className="seller-kicker">SELLER NOTES</span>{(analysis.result.seller_notes || []).map((note) => <span key={note}>• {note}</span>)}<small>Confidence: {Math.round(Number(analysis.result.confidence || 0))}%</small></section><div className="seller-form-actions ai-analysis-actions"><button type="button" className="seller-primary" onClick={applyAnalysis} disabled={analysisBusy}>APPLY SUGGESTIONS</button><button type="button" className="seller-secondary" onClick={analyzeItem} disabled={analysisBusy}>RETRY</button><button type="button" className="seller-secondary" onClick={() => setAnalysis(null)}>CANCEL</button></div></section></div>}{showSold && <div className="seller-modal-bg"><form className="seller-modal" onSubmit={markSold}><div className="modal-head"><h2>Mark as sold</h2><button type="button" onClick={() => setShowSold(false)}>×</button></div><p className="seller-muted">This updates master inventory and records the sale. External marketplace posts are not changed.</p><label>Sold via<select name="sold_via" defaultValue="HAQLOOKS">{MARKETPLACES.map((marketplace) => <option key={marketplace.key} value={marketplace.key}>{marketplace.label}</option>)}<option value="OTHER">Other</option></select></label><Field label="Sale price" name="sale_price" type="number" placeholder="2250000" required /><div className="seller-fields two"><Field label="Marketplace fee" name="marketplace_fee" type="number" placeholder="0" /><Field label="Payment fee" name="payment_fee" type="number" placeholder="0" /><Field label="Shipping subsidy" name="shipping_subsidy" type="number" placeholder="0" /><Field label="Other cost" name="other_cost" type="number" placeholder="0" /></div><label>Notes<textarea name="notes" rows="3" placeholder="Optional sale note" /></label><div className="seller-form-actions"><button className="seller-danger-button">Confirm sold</button><button type="button" className="seller-secondary" onClick={() => setShowSold(false)}>Cancel</button></div></form></div>}</div>
+  return (
+    <div>
+      <a className="seller-back-link" href="/seller/inventory" onClick={(event) => { event.preventDefault(); go('/seller/inventory') }}>← Back to inventory</a>
+      <SellerHeader eyebrow={`${item.sku || 'SKU pending'} / INVENTORY DETAIL`} title={`${item.brand} ${item.name}`} copy={`${item.size_label || 'Size not set'} · ${item.condition || 'Condition not set'} · added ${dateLabel(item.created_at)}`} action={<div className="seller-header-actions"><button type="button" className="seller-secondary compact seller-ai-button" onClick={analyzeItem} aria-disabled={!AI_ENABLED}>{analysisBusy ? 'ANALYZING…' : '✦ AI ANALYZE'}</button><a className="seller-secondary compact" href={`/seller/inventory/${id}/edit`} onClick={(event) => { event.preventDefault(); go(`/seller/inventory/${id}/edit`) }}>Edit item</a><span className={`inventory-status large ${item.status}`}>{titleCaseStatus(item.status)}</span></div>} />
+      {message && <Notice tone={message.startsWith('Sold recorded') ? 'success' : 'warning'}>{message}</Notice>}
+      {analysisMessage && <Notice tone="info">{analysisMessage}</Notice>}
+      <div className="detail-grid">
+        <section>
+          <div className="detail-hero"><img src={imageFor(item)} alt="" /><div><span>Purchase price</span><strong>{moneyIdr(item.purchase_price)}</strong><span>Suggested / minimum</span><b>{moneyIdr(item.suggested_price || item.price_idr)} / {moneyIdr(item.minimum_price)}</b></div></div>
+          <section className="seller-panel"><PanelTitle eyebrow="LISTING TRACKER" title="Marketplace status" /><div className="listing-stack">{MARKETPLACES.map((marketplace) => { const listing = listings.find((entry) => entry.marketplace === marketplace.key) || { marketplace: marketplace.key, listing_status: 'NOT_LISTED', listed_price: item.suggested_price || item.price_idr, listing_url: '' }; return <ListingRow key={marketplace.key} listing={listing} label={marketplace.label} onEdit={() => setEditingListing({ ...listing })} /> })}</div></section>
+        </section>
+        <aside className="detail-side">
+          <section className="seller-panel"><PanelTitle eyebrow="MASTER DATA" title="Item facts" /><dl className="seller-dl"><div><dt>Category</dt><dd>{item.category || '—'}</dd></div><div><dt>Source</dt><dd>{item.source || '—'}</dd></div><div><dt>Purchase date</dt><dd>{dateLabel(item.purchase_date)}</dd></div><div><dt>Defects</dt><dd>{item.defects || 'None noted'}</dd></div></dl>{item.source_url && <a className="seller-text-link" href={item.source_url} target="_blank" rel="noreferrer">Open source URL ↗</a>}</section>
+          {item.status !== 'sold' && <button className="seller-danger-button" type="button" onClick={() => setShowSold(true)}>MARK AS SOLD</button>}
+          {item.status === 'sold' && <section className="seller-panel"><PanelTitle eyebrow="SALE" title="Profit recorded" />{sales[0] ? <div className="profit-box"><span>Sold via {titleCaseStatus(sales[0].sold_via)}</span><strong>{moneyIdr(sales[0].sale_price)}</strong><p>Gross {moneyIdr(sales[0].gross_profit)} · Net {moneyIdr(sales[0].net_profit)}</p></div> : <p className="seller-muted">Sale details unavailable.</p>}</section>}
+        </aside>
+      </div>
+      {item.status === 'sold' && activeListings.length > 0 && <Notice tone="warning">⚠ This item is still listed on: {activeListings.map((listing) => titleCaseStatus(listing.marketplace)).join(', ')}. Remove or update those listings manually.</Notice>}
+      {editingListing && <div className="seller-modal-bg"><form className="seller-modal" onSubmit={saveListing}><div className="modal-head"><h2>{titleCaseStatus(editingListing.marketplace)} listing</h2><button type="button" onClick={() => setEditingListing(null)}>×</button></div><label>Status<select value={editingListing.listing_status} onChange={(event) => setEditingListing({ ...editingListing, listing_status: event.target.value })}>{LISTING_STATUSES.map((status) => <option key={status} value={status}>{titleCaseStatus(status)}</option>)}</select></label><label>Listed price<input type="number" value={editingListing.listed_price || ''} onChange={(event) => setEditingListing({ ...editingListing, listed_price: event.target.value })} /></label><label>Listing URL<input value={editingListing.listing_url || ''} onChange={(event) => setEditingListing({ ...editingListing, listing_url: event.target.value })} placeholder="https://…" /></label><div className="seller-form-actions"><button className="seller-primary">Save listing</button><button type="button" className="seller-secondary" onClick={() => setEditingListing(null)}>Cancel</button></div></form></div>}
+      {analysis && <ItemAnalysisReview analysis={analysis} selected={selectedSuggestions} onSelect={setSelectedSuggestions} onApply={applyAnalysis} onRetry={analyzeItem} onCancel={() => setAnalysis(null)} busy={analysisBusy} />}
+      {showSold && <div className="seller-modal-bg"><form className="seller-modal" onSubmit={markSold}><div className="modal-head"><h2>Mark as sold</h2><button type="button" onClick={() => setShowSold(false)}>×</button></div><p className="seller-muted">This updates master inventory and records the sale. External marketplace posts are not changed.</p><label>Sold via<select name="sold_via" defaultValue="HAQLOOKS">{MARKETPLACES.map((marketplace) => <option key={marketplace.key} value={marketplace.key}>{marketplace.label}</option>)}<option value="OTHER">Other</option></select></label><Field label="Sale price" name="sale_price" type="number" placeholder="2250000" required /><div className="seller-fields two"><Field label="Marketplace fee" name="marketplace_fee" type="number" placeholder="0" /><Field label="Payment fee" name="payment_fee" type="number" placeholder="0" /><Field label="Shipping subsidy" name="shipping_subsidy" type="number" placeholder="0" /><Field label="Other cost" name="other_cost" type="number" placeholder="0" /></div><label>Notes<textarea name="notes" rows="3" placeholder="Optional sale note" /></label><div className="seller-form-actions"><button className="seller-danger-button">Confirm sold</button><button type="button" className="seller-secondary" onClick={() => setShowSold(false)}>Cancel</button></div></form></div>}
+    </div>
+  )
+}
+
+function ItemAnalysisReview({ analysis, selected, onSelect, onApply, onRetry, onCancel, busy }) {
+  const result = analysis.result || {}
+  const recommendation = Array.isArray(result.marketplace_recommendations) ? result.marketplace_recommendations : []
+  const notes = analysisBilingualValue(result, 'seller_notes')
+
+  return <div className="seller-modal-bg ai-analysis-bg">
+    <section className="seller-modal ai-analysis-sheet" role="dialog" aria-modal="true" aria-labelledby="ai-analysis-title">
+      <div className="modal-head"><div><span className="seller-kicker">ITEM ANALYSIS / ANALISIS ITEM</span><h2 id="ai-analysis-title">Tinjau saran AI <small>Review AI suggestions</small></h2></div><button type="button" aria-label="Close analysis" onClick={onCancel}>×</button></div>
+      <p className="seller-muted">Saran tidak mengubah produk otomatis. Pilih kolom yang ingin diterapkan setelah ditinjau.<span> / Suggestions never overwrite the item automatically. Select fields to apply after review.</span></p>
+
+      <section className="ai-review-section"><h3>Identifikasi <small>/ Identification</small></h3><div className="ai-review-grid">
+        <AnalysisField result={result} fieldKey="detected_brand" label="Merek terdeteksi" labelEn="Detected brand" selectable checked={Boolean(selected.detected_brand)} onChange={(checked) => onSelect((current) => ({ ...current, detected_brand: checked }))} />
+        <AnalysisField result={result} fieldKey="suggested_title" label="Judul yang disarankan" labelEn="Suggested title" selectable checked={Boolean(selected.suggested_title)} onChange={(checked) => onSelect((current) => ({ ...current, suggested_title: checked }))} />
+        <AnalysisField result={result} fieldKey="suggested_category" label="Kategori" labelEn="Category" selectable checked={Boolean(selected.suggested_category)} onChange={(checked) => onSelect((current) => ({ ...current, suggested_category: checked }))} />
+        <AnalysisField result={result} fieldKey="color" label="Warna" labelEn="Color" />
+      </div></section>
+
+      <section className="ai-review-section"><h3>Kondisi <small>/ Condition</small></h3><div className="ai-review-grid">
+        <AnalysisField result={result} fieldKey="condition_summary" label="Ringkasan kondisi" labelEn="Condition summary" selectable checked={Boolean(selected.condition_summary)} onChange={(checked) => onSelect((current) => ({ ...current, condition_summary: checked }))} />
+        <AnalysisField result={result} fieldKey="visible_defects" label="Kekurangan terlihat" labelEn="Visible defects" selectable checked={Boolean(selected.visible_defects)} onChange={(checked) => onSelect((current) => ({ ...current, visible_defects: checked }))} />
+      </div></section>
+
+      <section className="ai-review-section"><h3>Era & gaya <small>/ Era & style</small></h3><div className="ai-review-grid">
+        <AnalysisField result={result} fieldKey="estimated_era" label="Perkiraan era" labelEn="Estimated era" />
+        <AnalysisField result={result} fieldKey="style" label="Gaya" labelEn="Style" />
+      </div></section>
+
+      <section className="ai-review-section"><h3>Rekomendasi marketplace <small>/ Marketplace recommendations</small></h3><div className="ai-marketplace-review">{recommendation.map((entry) => <article key={entry.marketplace}><b>{entry.marketplace}</b><span><strong>{entry.recommendation}</strong>{entry.recommendation_en && entry.recommendation_en !== entry.recommendation && <small>{entry.recommendation_en}</small>}{entry.listing_angle && <em>{entry.listing_angle}{entry.listing_angle_en && entry.listing_angle_en !== entry.listing_angle ? ` / ${entry.listing_angle_en}` : ''}</em>}</span></article>)}</div></section>
+
+      <section className="ai-authenticity-note"><h3>Catatan keaslian <small>/ Authenticity note</small></h3><strong>{result.authenticity_note || 'Keaslian belum diverifikasi. Perlu pemeriksaan manual.'}</strong><span>{result.authenticity_note_en || 'Authenticity not verified. Manual verification required.'}</span></section>
+
+      {notes.id && <section className="ai-review-section"><h3>Catatan untuk seller <small>/ Seller notes</small></h3><AnalysisField result={result} fieldKey="seller_notes" label="Catatan untuk seller" labelEn="Seller notes" selectable checked={Boolean(selected.seller_notes)} onChange={(checked) => onSelect((current) => ({ ...current, seller_notes: checked }))} /></section>}
+      <p className="ai-confidence">Keyakinan AI / AI confidence: {Math.round(Number(result.confidence || 0))}%</p>
+      <div className="seller-form-actions ai-analysis-actions"><button type="button" className="seller-primary" onClick={onApply} disabled={busy}>Terapkan Saran <small>Apply Suggestions</small></button><button type="button" className="seller-secondary" onClick={onRetry} disabled={busy}>Analisa Ulang <small>Retry</small></button><button type="button" className="seller-secondary" onClick={onCancel}>Batal <small>Cancel</small></button></div>
+    </section>
+  </div>
+}
+
+function AnalysisField({ result, fieldKey, label, labelEn, selectable = false, checked = false, onChange }) {
+  const value = analysisBilingualValue(result, fieldKey)
+  const hasValue = Boolean(value.id || value.en)
+  return <div className={`ai-analysis-field ${selectable ? 'selectable' : ''}`}>
+    {selectable && <input type="checkbox" aria-label={`Apply ${labelEn}`} checked={checked} onChange={(event) => onChange(event.target.checked)} disabled={!hasValue} />}
+    <span><b>{label}<small>/ {labelEn}</small></b><strong>{value.id || 'Belum ada saran'}</strong>{value.en && value.en !== value.id && <em>{value.en}</em>}{!value.id && <em>No suggestion available</em>}</span>
+  </div>
 }
 
 function EditInventory({ id }) {
