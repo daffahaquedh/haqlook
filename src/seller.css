@@ -28,7 +28,7 @@
   .seller-more-sheet a.active{border-color:#4f977e;background:#1b382e;color:#efe6d2}
   .seller-more-logout{grid-column:1/-1;justify-content:center;border-color:#754138;background:#371d19;color:#f0a18c}
   .seller-form-actions{position:sticky;z-index:20;bottom:calc(66px + env(safe-area-inset-bottom));margin:0 -4px;padding:10px 4px;background:linear-gradient(180deg,rgba(10,12,11,0),#0a0c0b 24%)}
-  .seller-form-actions .seller-primary,.seller-form-actions .seller-secondary{flex:1;min-width:0}
+.seller-form-actions .seller-primary,.seller-form-actions .seller-secondary{flex:1;min-width:0}
   .inventory-toolbar{position:sticky;z-index:15;top:calc(56px + env(safe-area-inset-top));padding:8px 0;background:linear-gradient(#0a0c0b 78%,rgba(10,12,11,0))}
   .seller-finance-grid{display:flex;overflow-x:auto;gap:8px;padding-bottom:4px;scroll-snap-type:x proximity}
   .seller-finance-grid .seller-metric{flex:0 0 154px;scroll-snap-align:start}
@@ -37,3 +37,5 @@
   .seller-modal-bg{align-items:end;padding:0}
   .seller-modal{max-height:calc(94vh - env(safe-area-inset-top));padding:17px 14px calc(17px + env(safe-area-inset-bottom));border-radius:10px 10px 0 0}
 }
+.photo-preview{position:relative;min-width:0}
+.photo-preview button{position:absolute;top:4px;right:4px;width:32px;height:32px;padding:0;border:1px solid rgba(255,255,255,.35);border-radius:50%;background:rgba(10,14,11,.82);color:#efe6d2;font-size:1.05rem;line-height:1}
