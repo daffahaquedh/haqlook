@@ -21,3 +21,7 @@
   .newsletter-form button{min-height:44px}
   .precise-footer{padding-bottom:calc(18px + env(safe-area-inset-bottom))}
 }
+
+@media(max-width:480px){
+  .hero-title{font-size:clamp(3.9rem,16.5vw,4.35rem)}
+}
