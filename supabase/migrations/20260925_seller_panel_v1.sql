@@ -13,7 +13,7 @@ security definer
 set search_path = public
 stable
 as $$
-  select role from public.admins where user_id = auth.uid();
+  select role from public.admins where user_id = (select auth.uid());
 $$;
 
 create or replace function public.is_staff()
@@ -104,15 +104,18 @@ create trigger products_assign_inventory_sku
 before insert on public.products
 for each row execute function public.assign_inventory_sku();
 
+drop policy if exists "Admin can read own profile" on public.admins;
+create policy "Admin can read own profile" on public.admins for select to authenticated using (user_id = (select auth.uid()));
+
 drop policy if exists "Admins can manage products" on public.products;
 drop policy if exists "Staff can read all products" on public.products;
 drop policy if exists "Staff can insert products" on public.products;
 drop policy if exists "Staff can update products" on public.products;
 drop policy if exists "Admins can delete products" on public.products;
-create policy "Staff can read all products" on public.products for select to authenticated using (public.is_staff());
-create policy "Staff can insert products" on public.products for insert to authenticated with check (public.is_staff());
-create policy "Staff can update products" on public.products for update to authenticated using (public.is_staff()) with check (public.is_staff());
-create policy "Admins can delete products" on public.products for delete to authenticated using (public.is_admin());
+create policy "Staff can read all products" on public.products for select to authenticated using ((select public.is_staff()));
+create policy "Staff can insert products" on public.products for insert to authenticated with check ((select public.is_staff()));
+create policy "Staff can update products" on public.products for update to authenticated using ((select public.is_staff())) with check ((select public.is_staff()));
+create policy "Admins can delete products" on public.products for delete to authenticated using ((select public.is_admin()));
 
 create table if not exists public.marketplace_listings (
   id uuid primary key default gen_random_uuid(),
@@ -128,8 +131,8 @@ create table if not exists public.marketplace_listings (
 alter table public.marketplace_listings enable row level security;
 drop policy if exists "Staff can read marketplace listings" on public.marketplace_listings;
 drop policy if exists "Staff can manage marketplace listings" on public.marketplace_listings;
-create policy "Staff can read marketplace listings" on public.marketplace_listings for select to authenticated using (public.is_staff());
-create policy "Staff can manage marketplace listings" on public.marketplace_listings for all to authenticated using (public.is_staff()) with check (public.is_staff());
+create policy "Staff can read marketplace listings" on public.marketplace_listings for select to authenticated using ((select public.is_staff()));
+create policy "Staff can manage marketplace listings" on public.marketplace_listings for all to authenticated using ((select public.is_staff())) with check ((select public.is_staff()));
 create index if not exists marketplace_listings_product_idx on public.marketplace_listings(product_id, marketplace);
 
 create table if not exists public.sales (
@@ -150,7 +153,7 @@ create table if not exists public.sales (
 );
 alter table public.sales enable row level security;
 drop policy if exists "Staff can read sales" on public.sales;
-create policy "Staff can read sales" on public.sales for select to authenticated using (public.is_staff());
+create policy "Staff can read sales" on public.sales for select to authenticated using ((select public.is_staff()));
 create index if not exists sales_sold_at_idx on public.sales(sold_at desc);
 
 create or replace function public.mark_product_sold(
@@ -213,8 +216,8 @@ create table if not exists public.sourcing_candidates (
 alter table public.sourcing_candidates enable row level security;
 drop policy if exists "Staff can read sourcing candidates" on public.sourcing_candidates;
 drop policy if exists "Staff can manage sourcing candidates" on public.sourcing_candidates;
-create policy "Staff can read sourcing candidates" on public.sourcing_candidates for select to authenticated using (public.is_staff());
-create policy "Staff can manage sourcing candidates" on public.sourcing_candidates for all to authenticated using (public.is_staff()) with check (public.is_staff());
+create policy "Staff can read sourcing candidates" on public.sourcing_candidates for select to authenticated using ((select public.is_staff()));
+create policy "Staff can manage sourcing candidates" on public.sourcing_candidates for all to authenticated using ((select public.is_staff())) with check ((select public.is_staff()));
 create index if not exists sourcing_candidates_status_idx on public.sourcing_candidates(status, created_at desc);
 
 create or replace function public.convert_sourcing_to_inventory(p_candidate_id uuid, p_purchase_price bigint)
@@ -249,8 +252,8 @@ create table if not exists public.app_settings (
 alter table public.app_settings enable row level security;
 drop policy if exists "Staff can read app settings" on public.app_settings;
 drop policy if exists "Admins can manage app settings" on public.app_settings;
-create policy "Staff can read app settings" on public.app_settings for select to authenticated using (public.is_staff());
-create policy "Admins can manage app settings" on public.app_settings for all to authenticated using (public.is_admin()) with check (public.is_admin());
+create policy "Staff can read app settings" on public.app_settings for select to authenticated using ((select public.is_staff()));
+create policy "Admins can manage app settings" on public.app_settings for all to authenticated using ((select public.is_admin())) with check ((select public.is_admin()));
 insert into public.app_settings(key, value) values ('ai_monthly_budget', '{"amount":100000,"currency":"IDR"}') on conflict (key) do nothing;
 
 create table if not exists public.ai_usage (
@@ -265,7 +268,7 @@ create table if not exists public.ai_usage (
 );
 alter table public.ai_usage enable row level security;
 drop policy if exists "Staff can read ai usage" on public.ai_usage;
-create policy "Staff can read ai usage" on public.ai_usage for select to authenticated using (public.is_staff());
+create policy "Staff can read ai usage" on public.ai_usage for select to authenticated using ((select public.is_staff()));
 create index if not exists ai_usage_created_at_idx on public.ai_usage(created_at desc);
 
 create or replace function public.seller_ai_usage_summary()
@@ -362,6 +365,28 @@ begin
 end;
 $$;
 grant execute on function public.release_ai_usage(uuid) to authenticated;
+
+revoke all on function public.assign_inventory_sku() from public;
+revoke all on function public.mark_product_sold(uuid, text, bigint, bigint, bigint, bigint, bigint, text) from public;
+revoke all on function public.convert_sourcing_to_inventory(uuid, bigint) from public;
+revoke all on function public.seller_ai_usage_summary() from public;
+revoke all on function public.seller_dashboard_summary() from public;
+revoke all on function public.reserve_ai_usage(text, text, numeric) from public;
+revoke all on function public.finalize_ai_usage(uuid, integer, integer, numeric) from public;
+revoke all on function public.release_ai_usage(uuid) from public;
+
+-- These helpers are not application RPC endpoints. Keep the existing trigger
+-- function working while preventing anonymous/authenticated Data API calls.
+do $$
+begin
+  if to_regprocedure('public.rls_auto_enable()') is not null then
+    execute 'revoke all on function public.rls_auto_enable() from public';
+  end if;
+  if to_regprocedure('public.update_updated_at()') is not null then
+    execute 'alter function public.update_updated_at() set search_path = pg_catalog';
+  end if;
+end;
+$$;
 
 -- Storage writes are allowed for both roles, while public reads remain unchanged.
 drop policy if exists "Admins can upload product images" on storage.objects;
