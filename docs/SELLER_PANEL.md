@@ -61,20 +61,15 @@ pnpm build
 
 The seller UI requires a configured Supabase project and a staff Auth user. Without them, `/seller` deliberately remains signed out; it does not provide a fake authenticated dashboard.
 
-## AI foundation
+## AI Item Analysis V1
 
-`supabase/functions/seller-ai/index.ts` is a server-side abstraction. It accepts only operational item fields, reserves monthly budget through the `reserve_ai_usage` database function, calls OpenAI, and records usage with `finalize_ai_usage`. The OpenAI key is read only from the Edge Function environment. The browser feature flag `VITE_AI_ENABLED` only changes the UI and never contains a secret.
+`supabase/functions/seller-ai/index.ts` is the server-side `ITEM_ANALYSIS` endpoint. It authenticates the Supabase session, checks the `admins` role, loads the product through RLS, limits analysis to up to five optimized Supabase Storage image URLs, reserves monthly budget through `reserve_ai_usage`, calls OpenAI Responses with structured JSON output, and records actual token usage through `finalize_ai_usage`.
 
-Before enabling the flag, deploy the function and configure:
+The default model is `gpt-5.6-luna`. The OpenAI key is read only from the encrypted Supabase Edge Function environment. Pricing is centralized in `supabase/functions/seller-ai/pricing.ts`; the model rates and IDR conversion can be overridden by server-side configuration. No `OPENAI_API_KEY` or service-role key belongs in Vite env, browser storage, source code, or GitHub.
 
-```text
-OPENAI_API_KEY=...
-OPENAI_SELLER_MODEL=...
-AI_RESERVATION_COST_IDR=...
-AI_ESTIMATED_COST_IDR=...
-```
+The product detail action is intentionally review-first: AI output is shown in a mobile-friendly sheet, every mapped product field is opt-in, and `APPLY SUGGESTIONS` is the only path that updates the product. The result always carries `authenticity_not_verified` and `manual verification required`; AI never claims authentication.
 
-If the key or function is absent, the UI says `AI belum dikonfigurasi`; inventory remains usable. AI responses are recommendations for human review, not authenticity guarantees.
+When `OPENAI_API_KEY` is absent, or `VITE_AI_ENABLED=false`, the UI clearly reports that AI is not active and inventory remains usable. The current branch keeps the browser flag disabled until the server secret is configured and the Edge Function is verified on preview.
 
 ## Telegram plan
 

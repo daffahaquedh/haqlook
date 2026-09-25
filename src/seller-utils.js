@@ -10,6 +10,31 @@ export const MARKETPLACES = [
 export const INVENTORY_STATUSES = ['draft', 'available', 'reserved', 'sold', 'archived']
 export const LISTING_STATUSES = ['NOT_LISTED', 'DRAFT', 'LISTED', 'SOLD', 'REMOVED']
 
+export const ITEM_ANALYSIS_SUGGESTIONS = [
+  { key: 'detected_brand', label: 'Brand', target: 'brand' },
+  { key: 'suggested_title', label: 'Title', target: 'name' },
+  { key: 'suggested_category', label: 'Category', target: 'category' },
+  { key: 'condition_summary', label: 'Condition summary', target: 'condition_notes' },
+  { key: 'visible_defects', label: 'Visible defects', target: 'defects' },
+  { key: 'seller_notes', label: 'Seller notes', target: 'description' },
+]
+
+export function analysisSuggestionValue(result, key) {
+  const value = result?.[key]
+  if (Array.isArray(value)) return value.filter(Boolean).join('; ')
+  return String(value || '').trim()
+}
+
+export function applyItemAnalysisSuggestions(item, result, selectedKeys) {
+  const next = { ...item }
+  ITEM_ANALYSIS_SUGGESTIONS.forEach(({ key, target }) => {
+    if (!selectedKeys?.[key]) return
+    const value = analysisSuggestionValue(result, key)
+    if (value) next[target] = value
+  })
+  return next
+}
+
 export function moneyIdr(value) {
   return new Intl.NumberFormat('id-ID', {
     style: 'currency',
