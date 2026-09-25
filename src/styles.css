@@ -2,6 +2,7 @@
 /* Mobile polish for the storefront. Keep the editorial identity, but make every key touchpoint comfortable on iPhone. */
 @media(max-width:760px){
   .nav-inner{height:calc(64px + env(safe-area-inset-top));padding-top:env(safe-area-inset-top)}
+  .hero-left,.hero-center{min-width:0}
   .menu,.icon-btn{min-width:44px;min-height:44px}
   .menu{display:grid;place-items:center;padding:0}
   .nav-links{top:calc(64px + env(safe-area-inset-top));padding:8px 14px}
