@@ -14,6 +14,7 @@ import {
 } from '../src/seller-utils.js'
 
 const sellerSource = await readFile(new URL('../src/seller.jsx', import.meta.url), 'utf8')
+const listingSource = await readFile(new URL('../src/listing-generator.jsx', import.meta.url), 'utf8')
 const cssSource = await readFile(new URL('../src/product-detail.css', import.meta.url), 'utf8')
 const detailSource = sellerSource.slice(sellerSource.indexOf('function InventoryDetail'), sellerSource.indexOf('function ItemAnalysisReview'))
 const completeItem = { status: 'available', brand: 'Vans', name: 'Slip-On', size_label: 'EU 43', condition: 'Good', category: 'Shoes' }
@@ -133,6 +134,8 @@ test('Listing Generator remains reachable from product actions and Marketplace',
   assert.match(detailSource, /setShowListingGenerator\(true\)/)
   assert.match(detailSource, /<ListingGenerator item=\{item\} listings=\{listings\} onClose=/)
   assert.match(sellerSource, /<ProductMarketplaceTab item=.*onGenerate=\{\(\) => setShowListingGenerator\(true\)\}/s)
+  assert.match(listingSource, /<strong>\{productDisplayTitle\(item\)\}<\/strong>/)
+  assert.doesNotMatch(listingSource, /<strong>\{item\.brand\} \{item\.name\}<\/strong>/)
 })
 
 test('marketplace listing edit controls remain reachable per channel', () => {

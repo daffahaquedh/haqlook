@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { AI_ENABLED, supabase } from './supabase-client'
 import { LISTING_PROFILES, LISTING_STATUSES, createListingGenerationBody, makeListingSavePayload, needsListingRegenerationConfirmation, normalizeListingResult } from './listing-utils'
+import { productDisplayTitle } from './seller-utils'
 
 function selectionFromSession() {
   try {
@@ -128,7 +129,7 @@ export default function ListingGenerator({ item, listings = [], onClose, onSaved
     <section className="listing-generator-sheet" role="dialog" aria-modal="true" aria-labelledby="listing-generator-title">
       <header className="listing-generator-head"><div><span className="seller-kicker">SELLER TOOL / MANUAL POSTING</span><h2 id="listing-generator-title">Buat Listing <small>/ Generate Listings</small></h2></div><button type="button" className="listing-close" aria-label="Close listing generator" onClick={onClose}>×</button></header>
       <div className="listing-generator-content">
-        <div className="listing-product-reference"><div className="listing-product-photos">{(Array.isArray(item.image_urls) ? item.image_urls : []).slice(0, 4).map((url, index) => <img key={`${url}-${index}`} src={url} alt={`${item.name} product reference ${index + 1}`} loading="lazy" />)}</div><div><strong>{item.brand} {item.name}</strong><span>{item.sku || 'SKU pending'} · {item.category || 'Category not set'} · Size {item.size_label || 'not set'}</span></div></div>
+        <div className="listing-product-reference"><div className="listing-product-photos">{(Array.isArray(item.image_urls) ? item.image_urls : []).slice(0, 4).map((url, index) => <img key={`${url}-${index}`} src={url} alt={`${item.name} product reference ${index + 1}`} loading="lazy" />)}</div><div><strong>{productDisplayTitle(item)}</strong><span>{item.sku || 'SKU pending'} · {item.category || 'Category not set'} · Size {item.size_label || 'not set'}</span></div></div>
         <div className="listing-authenticity-note"><strong>Keaslian belum diverifikasi</strong><span>Authenticity not verified. Manual verification required.</span></div>
         {savedMarketplaces.length > 0 && <div className="listing-active-warning">⚠ Masih LISTED: {savedMarketplaces.map((key) => profileByKey[LISTING_PROFILES.find((profile) => profile.marketplace === key)?.key]?.label || key).join(', ')}. Status eksternal tidak diubah AI; perbarui secara manual.</div>}
       <section className="listing-marketplace-picker"><div><strong>Pilih marketplace</strong><span>Satu permintaan AI untuk semua pilihan yang dicentang.</span></div><div className="listing-profile-options">{LISTING_PROFILES.map((profile) => <label key={profile.key} className={selected.includes(profile.key) ? 'selected' : ''}><input type="checkbox" checked={selected.includes(profile.key)} onChange={() => toggleProfile(profile.key)} /><span><b>{profile.label}</b><small>{profile.language} · {profile.style}</small></span></label>)}</div><button className="seller-primary listing-generate-button" type="button" disabled={busy || !selected.length || !AI_ENABLED || String(item.status).toLowerCase() === 'sold'} onClick={() => needsListingRegenerationConfirmation(draftKeys.length > 0, confirmAgain) ? setConfirmAgain(true) : generate()}>{busy ? 'MEMBUAT DRAFT LISTING…' : confirmAgain ? 'KONFIRMASI BUAT ULANG' : draftKeys.length ? 'GENERATE AGAIN / BUAT ULANG' : 'GENERATE LISTINGS / BUAT DRAFT'}</button>{busy && <p className="listing-activity" role="status">AI sedang menyesuaikan listing untuk marketplace yang dipilih…</p>}{confirmAgain && <div className="listing-regenerate-confirm" role="group"><span>AI akan membuat ulang draft listing untuk marketplace yang dipilih.</span><button type="button" className="seller-secondary" onClick={() => setConfirmAgain(false)}>Cancel</button></div>}{!AI_ENABLED && <p className="listing-activity">AI belum diaktifkan. Draft yang tersimpan tetap dapat diedit, disalin, dan dikelola tanpa biaya AI.</p>}</section>
@@ -152,3 +153,4 @@ export default function ListingGenerator({ item, listings = [], onClose, onSaved
     </section>
   </div>
 }
+
