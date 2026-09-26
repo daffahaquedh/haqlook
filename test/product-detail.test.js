@@ -5,6 +5,8 @@ import {
   PRODUCT_DETAIL_TABS,
   canAccessWorkspaceSection,
   marketplaceStatusLabel,
+  productDetailSubtitle,
+  productDisplayTitle,
   productDetailActiveListings,
   productDetailPrimaryAction,
   productDetailTabForKey,
@@ -74,6 +76,17 @@ test('seller-facing marketplace statuses are clear while database enums remain u
   assert.equal(marketplaceStatusLabel('DRAFT'), 'Draft')
   assert.equal(marketplaceStatusLabel('LISTED'), 'Tayang')
   assert.equal(marketplaceStatusLabel('REMOVED'), 'Dihapus')
+})
+
+test('product title does not repeat a brand already present at the start of the name', () => {
+  assert.equal(productDisplayTitle({ brand: 'Vans', name: 'Vans Slip-On x Iron Maiden' }), 'Vans Slip-On x Iron Maiden')
+  assert.equal(productDisplayTitle({ brand: 'Nike', name: 'Air Max 90' }), 'Nike Air Max 90')
+  assert.equal(productDisplayTitle({ brand: '', name: 'Unbranded jacket' }), 'Unbranded jacket')
+})
+
+test('product header omits size when it is already embedded in the item title', () => {
+  assert.equal(productDetailSubtitle({ name: 'Vans Slip-On EU 43.5', size_label: 'EU 43.5', condition: 'Good', category: 'Sepatu' }), 'Good · Sepatu')
+  assert.equal(productDetailSubtitle({ name: 'Work jacket', size_label: 'L', condition: 'Good', category: 'Jaket' }), 'L · Good · Jaket')
 })
 
 test('Ringkas is selected by default and reset safely for another product id', () => {

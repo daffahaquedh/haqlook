@@ -16,6 +16,8 @@ import {
   LISTING_STATUSES,
   MARKETPLACES,
   PRODUCT_DETAIL_TABS,
+  productDisplayTitle,
+  productDetailSubtitle,
   moneyIdr,
   marketplaceStatusLabel,
   productDetailActiveListings,
@@ -404,7 +406,7 @@ function InventoryDetail({ id }) {
     <header className="product-workspace-header">
       <a className="product-back-link" href="/seller/inventory" onClick={(event) => { event.preventDefault(); go('/seller/inventory') }}>← Barang</a>
       <div className="product-heading-row">
-        <div className="product-heading-copy"><span className="seller-kicker">BARANG / {item.sku || 'SKU pending'}</span><h1 id="product-workspace-title">{item.brand} {item.name}</h1><p>{[item.size_label, item.condition, item.category].filter(Boolean).join(' · ') || 'Detail barang'}</p></div>
+        <div className="product-heading-copy"><span className="seller-kicker">BARANG / {item.sku || 'SKU pending'}</span><h1 id="product-workspace-title">{productDisplayTitle(item)}</h1><p>{productDetailSubtitle(item)}</p></div>
         <span className={`inventory-status large ${String(item.status || '').toLowerCase()}`}>{titleCaseStatus(item.status)}</span>
       </div>
       <div className="product-action-bar">{primaryButton}<button type="button" className="seller-secondary product-secondary-action" onClick={analyzeItem} aria-disabled={!AI_ENABLED}>{analysisBusy ? 'Sedang menganalisis…' : '✦ Cek dengan AI'}</button></div>
@@ -438,7 +440,7 @@ function ProductSummaryTab({ item, analysis, analysisApplied, onEdit, onReviewAn
   const aiDefects = analysisBilingualValue(result, 'visible_defects').id
   return <div className="product-summary-grid">
     <section className="seller-panel product-item-panel">
-      <div className="product-photo-frame"><img src={imageFor(item)} alt={`${item.brand || ''} ${item.name || 'Foto barang'}`} /></div>
+      <div className="product-photo-frame"><img src={imageFor(item)} alt={productDisplayTitle(item)} /></div>
       <div className="product-item-content">
         <div className="product-facts-grid"><ProductDetailFact label="Merek" value={item.brand} /><ProductDetailFact label="Kategori" value={item.category} /><ProductDetailFact label="Ukuran" value={item.size_label} /><ProductDetailFact label="Kondisi" value={item.condition} />{item.color && <ProductDetailFact label="Warna" value={item.color} />}{item.material && <ProductDetailFact label="Material" value={item.material} />}</div>
         <div className="product-money-grid"><ProductDetailFact label="Modal" value={moneyIdr(item.purchase_price)} /><ProductDetailFact label="Harga target" value={moneyIdr(item.suggested_price || item.price_idr)} /><ProductDetailFact label="Harga minimum" value={moneyIdr(item.minimum_price)} /></div>

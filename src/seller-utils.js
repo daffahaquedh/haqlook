@@ -16,6 +16,24 @@ export const PRODUCT_DETAIL_TABS = [
   { id: 'sales', label: 'Penjualan' },
 ]
 
+export function productDisplayTitle(item = {}) {
+  const brand = String(item.brand || '').trim()
+  const name = String(item.name || '').trim()
+  if (!brand) return name || 'Barang tanpa nama'
+  if (!name) return brand
+  const brandPrefixMatches = name.slice(0, brand.length).toLocaleLowerCase() === brand.toLocaleLowerCase()
+    && (name.length === brand.length || /[\s\-/:,]/.test(name[brand.length]))
+  return brandPrefixMatches ? name : `${brand} ${name}`
+}
+
+export function productDetailSubtitle(item = {}) {
+  const name = String(item.name || '').toLocaleLowerCase()
+  const attributes = [item.size_label, item.condition, item.category]
+    .filter(Boolean)
+    .filter((value) => !(String(value).length > 2 && name.includes(String(value).toLocaleLowerCase())))
+  return attributes.join(' · ') || 'Detail barang'
+}
+
 export function productDetailTabForKey(currentTab, key) {
   const index = PRODUCT_DETAIL_TABS.findIndex((tab) => tab.id === currentTab)
   if (index < 0) return PRODUCT_DETAIL_TABS[0].id
@@ -204,5 +222,4 @@ export function safeHttpUrl(value) {
 export function titleCaseStatus(value = '') {
   return String(value).replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
-
 
