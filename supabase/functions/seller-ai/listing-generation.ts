@@ -63,7 +63,7 @@ export function redactPrivateNotes(value) {
     .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[redacted]')
     .replace(/(?:\+?\d[\d\s().-]{8,}\d)/g, '[redacted]')
     .split(/\r?\n/)
-    .filter((line) => !/\b(buyer|customer|email|phone|address|alamat|nomor rekening|payment|pembayaran|password|marketplace login)\b/i.test(line))
+    .filter((line) => !/\b(buyer|customer|email|phone|address|alamat|lokasi|contact|jalan|jln\.?|jl\.?|gang|gg\.?|rt\s*\/?\s*rw|rt\s+\d|rw\s+\d|kecamatan|kelurahan|kode pos|postal code|nomor rekening|rekening|account number|bank|payment|pembayaran|credit card|password|otp|marketplace login)\b/i.test(line))
     .join(' ')
 }
 

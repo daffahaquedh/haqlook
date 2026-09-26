@@ -16,6 +16,7 @@ import {
   createListingGenerationSchema,
   handleListingGeneration,
   normalizeGeneratedListing,
+  redactPrivateNotes,
   parseListingGenerationResponse,
   selectedMarketplaces,
 } from '../supabase/functions/seller-ai/listing-generation.ts'
@@ -223,6 +224,12 @@ test('private contact and payment notes are omitted from the OpenAI product inpu
   const text = request.input[0].content[0].text
   assert.doesNotMatch(text, /person@example.com|\+62 812 3456 7890|buyer:/i)
   assert.match(text, /light wear/)
+})
+
+test('street-address and financial-detail lines are omitted from the OpenAI product input', () => {
+  const cleaned = redactPrivateNotes('Jl. Melati No. 5, RT 02/RW 03\nNomor rekening 123456789012\nCuff shows light wear')
+  assert.doesNotMatch(cleaned, /Melati|RT 02|rekening|123456789012/i)
+  assert.match(cleaned, /Cuff shows light wear/)
 })
 
 test('price generation is excluded and output cannot retain an unsupported resale price', () => {
