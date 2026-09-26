@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { AI_ENABLED, supabase } from './supabase-client'
 import { prepareProductPhoto } from './seller-photos'
-import { detectHunterCategories, detectHunterDestination, filterHunterTargets, HUNTER_DESTINATIONS, parseHunterBudget } from './hunter-utils'
+import { filterHunterTargets, HUNTER_DESTINATIONS, sortHunterTargets } from './hunter-utils'
+import { routeHunterInteraction } from './hunter-router'
 import { moneyIdr } from './seller-utils'
 import './hunter.css'
 
@@ -26,12 +27,14 @@ async function callHunterFunction(body) {
   const { data, error } = await supabase.functions.invoke('seller-ai', { body })
   if (error) {
     let message = error.message
+    let errorCode = ''
     try {
       const response = error.context
       const payload = await (typeof response?.clone === 'function' ? response.clone() : response).json()
       message = payload?.message || payload?.error || message
+      errorCode = payload?.error || ''
     } catch { /* Keep the SDK error if there is no readable response body. */ }
-    throw Object.assign(new Error(message || 'Hunter request failed.'), { code: payload?.error })
+    throw Object.assign(new Error(message || 'Hunter request failed.'), { code: errorCode })
   }
   if (!data?.ok) throw Object.assign(new Error(data?.message || data?.error || 'AI Hunter request failed.'), { code: data?.error })
   return data
@@ -95,7 +98,11 @@ export function HunterChatPage() {
   const [destination, setDestination] = useState('')
   const [categoryFocus, setCategoryFocus] = useState([])
   const [budgetIdr, setBudgetIdr] = useState(null)
-  const [internationalOnly, setInternationalOnly] = useState(false)
+  const [marketGoal, setMarketGoal] = useState('both')
+  const [preflightStep, setPreflightStep] = useState('destination')
+  const [activeSection, setActiveSection] = useState('all')
+  const [sortMode, setSortMode] = useState('best')
+  const [pendingRefresh, setPendingRefresh] = useState(false)
   const [isHere, setIsHere] = useState(false)
   const [question, setQuestion] = useState('')
   const [loading, setLoading] = useState(false)
@@ -112,6 +119,7 @@ export function HunterChatPage() {
   const [checkBusy, setCheckBusy] = useState(false)
   const [checkError, setCheckError] = useState('')
   const chatEnd = useRef(null)
+  const requestInFlight = useRef(false)
 
   useEffect(() => { void initialize() }, [])
   useEffect(() => { chatEnd.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }) }, [messages.length, loading])
@@ -139,7 +147,7 @@ export function HunterChatPage() {
   }
 
   async function selectSession(session) {
-    setSessionId(session.id); setDestination(session.destination || ''); setCategoryFocus(session.category_focus || []); setBudgetIdr(session.budget_idr || null); setIsHere(Boolean(session.is_here)); setError('')
+    setSessionId(session.id); setDestination(session.destination || ''); setCategoryFocus(session.category_focus || []); setBudgetIdr(session.budget_idr || null); setMarketGoal('both'); setActiveSection('all'); setFocusedTargetIds([]); setSortMode('best'); setPreflightStep(session.destination ? 'budget' : 'destination'); setPendingRefresh(false); setIsHere(Boolean(session.is_here)); setError('')
     const { data, error: messagesError } = await supabase.from('hunter_messages').select('id,role,content,message_kind,metadata,created_at').eq('session_id', session.id).order('created_at', { ascending: true }).limit(100)
     if (messagesError) { setError(errorMessage(messagesError)); setMessages([]); return }
     setMessages(data || [])
@@ -147,6 +155,7 @@ export function HunterChatPage() {
     if (latestBriefMessage) {
       const { data: briefRecord } = await supabase.from('hunter_briefs').select('id,destination,brief_json,citations,created_at,expires_at').eq('id', latestBriefMessage.metadata.brief_id).maybeSingle()
       setBrief(briefRecord ? { id: briefRecord.id, destination: briefRecord.destination, brief: briefRecord.brief_json, citations: briefRecord.citations || [], created_at: briefRecord.created_at, expires_at: briefRecord.expires_at } : null)
+      if (briefRecord && String(briefRecord.destination || '').toLocaleLowerCase('id-ID') === String(session.destination || '').toLocaleLowerCase('id-ID')) setPreflightStep('done')
       if (briefRecord) {
         const { data: saved } = await supabase.from('sourcing_candidates').select('id,title,status,hunter_target_key').eq('hunter_brief_id', briefRecord.id).not('hunter_target_key', 'is', null)
         setSourceCandidates(Object.fromEntries((saved || []).map((candidate) => [candidate.hunter_target_key, candidate])))
@@ -161,7 +170,7 @@ export function HunterChatPage() {
     if (!user) { setError('Sesi seller tidak tersedia. Silakan login ulang.'); return }
     const { data, error: createError } = await supabase.from('hunter_sessions').insert({ user_id: user.id }).select('id,destination,category_focus,budget_idr,is_here,updated_at').single()
     if (createError) { setError(errorMessage(createError)); return }
-    setSessions((current) => [data, ...current].slice(0, 20)); setBrief(null); setMessages([]); setDestination(''); setCategoryFocus([]); setBudgetIdr(null); setIsHere(false); setNotSeen({}); await selectSession(data)
+    setSessions((current) => [data, ...current].slice(0, 20)); setBrief(null); setMessages([]); setDestination(''); setCategoryFocus([]); setBudgetIdr(null); setMarketGoal('both'); setActiveSection('all'); setSortMode('best'); setPreflightStep('destination'); setPendingRefresh(false); setIsHere(false); setNotSeen({}); await selectSession(data)
   }
 
   async function updateSession(values) {
@@ -172,56 +181,126 @@ export function HunterChatPage() {
     else setSessions((current) => current.map((session) => session.id === sessionId ? { ...session, ...next } : session))
   }
 
-  async function sendMessage(text, { destinationOverride = '', forceRefresh = false } = {}) {
-    const trimmed = String(text || '').trim().slice(0, 1000)
-    if (!trimmed || loading) return
-    if (!AI_ENABLED) { setError('AI Hunter belum diaktifkan di environment ini. Coba lagi setelah backend AI disiapkan.'); return }
-    if (!supabase || !sessionId) { setError('Sesi belum siap. Muat ulang Seller Panel lalu coba lagi.'); return }
+  function routerState() { return { destination, budgetIdr, categoryFocus, marketGoal, preflightStep, activeSection } }
+
+  async function applyRouterState(next) {
+    if (!next) return
+    setDestination(next.destination || '')
+    setBudgetIdr(next.budgetIdr ?? null)
+    setCategoryFocus(next.categoryFocus || [])
+    setMarketGoal(next.marketGoal || 'both')
+    setPreflightStep(next.preflightStep || 'summary')
+    setActiveSection(next.activeSection || 'all')
+    const changes = {}
+    if (next.destination !== destination) changes.destination = next.destination || null
+    if (next.budgetIdr !== undefined) changes.budget_idr = next.budgetIdr
+    if (next.categoryFocus) changes.category_focus = next.categoryFocus
+    if (Object.keys(changes).length) await updateSession(changes)
+  }
+
+  function appendLocalExchange(sellerText, reply) {
+    const at = new Date().toISOString()
+    setMessages((current) => [...current,
+      ...(sellerText ? [{ id: `local-user-${Date.now()}`, role: 'user', content: sellerText, message_kind: 'local', created_at: at }] : []),
+      { id: `local-assistant-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, role: 'assistant', content: reply, message_kind: 'local', created_at: at },
+    ])
+  }
+
+  async function executeHunterDecision(decision, { message = '', itemBody = null } = {}) {
+    if (!['LOAD_CACHE', 'START_RESEARCH', 'REFRESH_RESEARCH', 'AI_CHAT', 'ITEM_CHECK'].includes(decision?.type)) return null
+    if (requestInFlight.current) return null
+    if (!AI_ENABLED) { setError('AI belum diaktifkan di environment ini. Rencana dan inventory manual tetap bisa digunakan.'); return null }
+    if (!supabase || !sessionId) { setError('Sesi belum siap. Muat ulang Seller Panel lalu coba lagi.'); return null }
+    const feature = decision.type === 'LOAD_CACHE' || decision.type === 'START_RESEARCH' ? 'HUNTER_DESTINATION_BRIEF'
+      : decision.type === 'REFRESH_RESEARCH' ? 'HUNTER_REFRESH'
+        : decision.type === 'AI_CHAT' ? 'HUNTER_CHAT' : 'HUNTER_ITEM_CHECK'
+    const requestBody = itemBody || {
+      feature,
+      session_id: sessionId,
+      message,
+      destination,
+      category_focus: categoryFocus,
+      budget_idr: budgetIdr,
+      market_goal: marketGoal,
+      active_section: activeSection,
+      selected_target_ids: focusedTargetIds.slice(0, 3),
+      ...(['LOAD_CACHE', 'START_RESEARCH', 'REFRESH_RESEARCH'].includes(decision.type) ? { research_confirmed: true } : {}),
+    }
+    const optimisticId = `pending-${Date.now()}`
+    if (message && feature !== 'HUNTER_ITEM_CHECK') setMessages((current) => [...current, { id: optimisticId, role: 'user', content: message, message_kind: 'chat', created_at: new Date().toISOString() }])
     setError('')
-    const detected = destinationOverride || detectHunterDestination(trimmed)
-    const nextDestination = detected || destination
-    const budget = parseHunterBudget(trimmed)
-    const categories = detectHunterCategories(trimmed)
-    const wantsInternational = /luar negeri|dijual ke luar|overseas|international|internasional/i.test(trimmed)
-    const nextBudget = budget || budgetIdr
-    const nextCategories = categories.length ? categories : categoryFocus
-    const nextInternational = wantsInternational || internationalOnly
-    if (detected) setDestination(detected)
-    if (budget) setBudgetIdr(budget)
-    if (categories.length) setCategoryFocus(categories)
-    if (wantsInternational) setInternationalOnly(true)
-    await updateSession({ ...(detected ? { destination: detected } : {}), ...(budget ? { budget_idr: budget } : {}), ...(categories.length ? { category_focus: categories } : {}) })
-    const currentBriefDestination = brief?.destination || brief?.brief?.destination_name || ''
-    const feature = forceRefresh ? 'HUNTER_REFRESH' : nextDestination && (!brief || currentBriefDestination.toLowerCase() !== nextDestination.toLowerCase()) ? 'HUNTER_DESTINATION_BRIEF' : 'HUNTER_CHAT'
-    const optimisticMessageId = `local-user-${Date.now()}`
-    setMessages((current) => [...current, { id: optimisticMessageId, role: 'user', content: trimmed, message_kind: 'chat', created_at: new Date().toISOString() }])
-    setLoading(true); setLoadingLabel(feature === 'HUNTER_CHAT' ? 'Menyiapkan jawaban dari brief yang sudah ada…' : 'Mencari referensi publik terbaru…')
+    requestInFlight.current = true
+    setLoading(true)
+    setLoadingLabel(feature === 'HUNTER_CHAT' ? 'Menyiapkan jawaban dari brief tersimpan…' : feature === 'HUNTER_REFRESH' ? 'Memperbarui referensi pasar…' : 'Memeriksa cache sebelum mencari…')
     try {
-      const data = await callHunterFunction({
-        feature,
-        session_id: sessionId,
-        message: trimmed,
-        destination: nextDestination,
-        category_focus: nextCategories,
-        budget_idr: nextBudget,
-        international_only: nextInternational,
-      })
+      const data = await callHunterFunction(requestBody)
       if (data.session_id && data.session_id !== sessionId) setSessionId(data.session_id)
       if (data.destination) setDestination(data.destination)
-      if (data.brief) setBrief(data.brief)
+      if (data.brief) { setBrief(data.brief); setPreflightStep('done'); setPendingRefresh(false) }
       if (Array.isArray(data.category_focus)) setCategoryFocus(data.category_focus)
       if (data.budget_idr != null) setBudgetIdr(data.budget_idr)
       if (Array.isArray(data.focused_target_ids)) setFocusedTargetIds(data.focused_target_ids)
-      setMessages((current) => [...current, { id: `local-assistant-${Date.now()}`, role: 'assistant', content: data.assistant_message || data.reply || 'Selesai.', message_kind: data.brief ? 'brief' : 'chat', metadata: data.brief_id ? { brief_id: data.brief_id } : {}, created_at: new Date().toISOString() }])
+      if (feature !== 'HUNTER_ITEM_CHECK') setMessages((current) => [...current, { id: `local-assistant-${Date.now()}`, role: 'assistant', content: data.assistant_message || data.reply || 'Selesai.', message_kind: data.brief ? 'brief' : 'chat', metadata: data.brief_id ? { brief_id: data.brief_id } : {}, created_at: new Date().toISOString() }])
       if (data.session_id) setSessions((current) => current.map((session) => session.id === data.session_id ? { ...session, updated_at: new Date().toISOString(), destination: data.destination || session.destination } : session))
+      return data
     } catch (caught) {
-      if (feature === 'HUNTER_DESTINATION_BRIEF' || feature === 'HUNTER_REFRESH') setMessages((current) => current.filter((item) => item.id !== optimisticMessageId))
+      if (message && feature !== 'HUNTER_ITEM_CHECK') setMessages((current) => current.filter((item) => item.id !== optimisticId))
       setError(errorMessage(caught, 'AI Hunter sedang tidak tersedia.'))
+      throw caught
+    } finally {
+      requestInFlight.current = false; setLoading(false); setLoadingLabel(''); void refreshAiBudget()
     }
-    finally { setLoading(false); setLoadingLabel(''); void refreshAiBudget() }
   }
 
-  const visibleTargets = useMemo(() => filterHunterTargets(brief?.brief, { categories: categoryFocus, budgetIdr, internationalOnly }).filter((target) => !focusedTargetIds.length || focusedTargetIds.includes(target.target_id)), [brief, categoryFocus, budgetIdr, internationalOnly, focusedTargetIds])
+  async function handleText(text) {
+    const trimmed = String(text || '').trim().slice(0, 1000)
+    if (!trimmed || loading) return
+    const hasCurrentBrief = Boolean(brief && String(brief.destination || brief.brief?.destination_name || '').toLocaleLowerCase('id-ID') === String(destination).toLocaleLowerCase('id-ID'))
+    const decision = routeHunterInteraction({ text: trimmed, state: routerState(), hasBrief: hasCurrentBrief })
+    if (decision.type === 'PREFLIGHT_RESPONSE' || decision.type === 'PREFLIGHT_CLARIFY' || decision.type === 'LOCAL_FILTER' || decision.type === 'LOCAL_SORT') {
+      setError('')
+      await applyRouterState(decision.state)
+      if (decision.type === 'LOCAL_SORT') {
+        const filtered = filterHunterTargets(brief?.brief, { categories: categoryFocus, budgetIdr, marketGoal, activeSection })
+        const sorted = sortHunterTargets(filtered, decision.sort)
+        setSortMode(decision.sort)
+        setFocusedTargetIds(decision.limit ? sorted.slice(0, decision.limit).map((target) => target.target_id) : [])
+      } else if (decision.type === 'LOCAL_FILTER') { setFocusedTargetIds([]); setSortMode('best') }
+      appendLocalExchange(trimmed, decision.reply)
+      return
+    }
+    await executeHunterDecision(decision, { message: trimmed })
+  }
+
+  async function choosePreflight(action, value, label) {
+    const decision = routeHunterInteraction({ action, value, state: routerState() })
+    setError('')
+    await applyRouterState(decision.state)
+    if (decision.type === 'LOCAL_FILTER') { setFocusedTargetIds([]); setSortMode('best') }
+    appendLocalExchange(label, decision.reply)
+  }
+
+  async function confirmResearch() {
+    const decision = routeHunterInteraction({ action: 'confirm_research', state: routerState() })
+    if (decision.type === 'PREFLIGHT_CLARIFY') { setError(decision.reply); return }
+    await executeHunterDecision(decision, { message: `Rencana hunting: ${destination}` })
+  }
+
+  async function confirmRefresh() {
+    const decision = routeHunterInteraction({ action: 'refresh_research', state: routerState() })
+    await executeHunterDecision(decision, { message: `Perbarui research untuk ${destination || brief?.destination}` })
+  }
+
+  async function analyzeItemThroughRouter(requestBody) {
+    const decision = routeHunterInteraction({ action: 'item_check', state: routerState() })
+    return executeHunterDecision(decision, { itemBody: requestBody })
+  }
+
+  const hasCurrentBrief = Boolean(brief && String(brief.destination || brief.brief?.destination_name || '').toLocaleLowerCase('id-ID') === String(destination).toLocaleLowerCase('id-ID'))
+  const visibleTargets = useMemo(() => {
+    const filtered = filterHunterTargets(brief?.brief, { categories: categoryFocus, budgetIdr, marketGoal, activeSection })
+    return sortHunterTargets(filtered, sortMode).filter((target) => !focusedTargetIds.length || focusedTargetIds.includes(target.target_id))
+  }, [brief, categoryFocus, budgetIdr, marketGoal, activeSection, sortMode, focusedTargetIds])
 
   async function toggleHere() {
     const next = !isHere; setIsHere(next); await updateSession({ is_here: next })
@@ -268,7 +347,7 @@ export function HunterChatPage() {
     setNotSeen((current) => ({ ...current, [target.target_id]: !current[target.target_id] }))
   }
 
-  function submitInput(event) { event.preventDefault(); const text = question; setQuestion(''); void sendMessage(text) }
+  function submitInput(event) { event.preventDefault(); const text = question; setQuestion(''); void handleText(text) }
 
   const age = brief?.created_at ? new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Jakarta' }).format(new Date(brief.created_at)) : ''
 
@@ -279,19 +358,26 @@ export function HunterChatPage() {
     {error && <div className="hunter-error" role="alert">{error}</div>}
     <section className="hunter-chat" aria-label="Percakapan AI Hunter">
       <div className="hunter-bubble assistant"><small>HAQLOOKS HUNTER</small><p>{OPENING}</p><p className="hunter-translation">Where are you sourcing today?</p></div>
-      {!messages.length && <div className="hunter-quick-destinations" aria-label="Quick destinations">{HUNTER_DESTINATIONS.map((place) => <button type="button" key={place.value} disabled={!AI_ENABLED || loading} onClick={() => void sendMessage(`Hari ini mau hunting ke ${place.label}. Apa yang bagus dicari?`, { destinationOverride: place.value })}>{place.label}</button>)}<button type="button" disabled={!AI_ENABLED || loading} onClick={() => setQuestion('Hari ini aku mau hunting ke ')}>＋ Tempat lain / Other</button></div>}
       {messages.map((message) => <article className={`hunter-bubble ${message.role === 'assistant' ? 'assistant' : 'seller'}`} key={message.id}><small>{message.role === 'assistant' ? 'HAQLOOKS HUNTER' : 'KAMU / YOU'}</small><p>{message.content}</p></article>)}
       {loading && <div className="hunter-bubble assistant hunter-thinking" role="status"><span className="hunter-pulse" />{loadingLabel}</div>}
       <div ref={chatEnd} />
     </section>
-    {brief && <HunterBriefView briefRecord={brief} age={age} isHere={isHere} visibleTargets={visibleTargets} categories={categoryFocus} budgetIdr={budgetIdr} internationalOnly={internationalOnly} onRefresh={() => void sendMessage(`Perbarui research untuk ${destination || brief.destination}`, { destinationOverride: destination || brief.destination, forceRefresh: true })} onToggleHere={() => void toggleHere()} onSaveTarget={saveTarget} sourceCandidates={sourceCandidates} notSeen={notSeen} onNotSeen={markNotSeen} onCheck={(target) => { setCheckTarget(target); setCheckFiles([]); setCheckPrice(''); setItemCheck(null); setCheckError('') }} />}
-    <form className="hunter-composer" onSubmit={submitInput}><label className="sr-only" htmlFor="hunter-question">Tulis pesan ke AI Hunter</label><textarea id="hunter-question" rows="2" maxLength="1000" value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submitInput(event) } }} placeholder="Ceritakan rencana hunting, budget, atau fokus barang…" disabled={!AI_ENABLED || loading} /><button className="hunter-send" type="submit" disabled={!AI_ENABLED || loading || !question.trim()} aria-label="Kirim pesan">{loading ? '…' : 'Kirim ↑'}</button></form>
-    {brief && <div className="hunter-suggested-filters"><button type="button" onClick={() => { setCategoryFocus(['T-shirts', 'Jackets']); void updateSession({ category_focus: ['T-shirts', 'Jackets'] }) }}>Kaos + jaket</button><button type="button" onClick={() => { setBudgetIdr(300000); void updateSession({ budget_idr: 300000 }) }}>Modal Rp300k</button><button type="button" onClick={() => setInternationalOnly((current) => !current)}>{internationalOnly ? 'Tampilkan semua' : 'Mudah dijual ke luar'}</button><button type="button" onClick={() => { setCategoryFocus([]); setBudgetIdr(null); setInternationalOnly(false); setFocusedTargetIds([]); void updateSession({ category_focus: [], budget_idr: null }) }}>Reset filter</button></div>}
-    {checkTarget && <HunterItemCheckSheet target={checkTarget} destination={destination} sessionId={sessionId} briefId={brief?.id} files={checkFiles} setFiles={setCheckFiles} askingPrice={checkPrice} setAskingPrice={setCheckPrice} result={itemCheck} setResult={setItemCheck} busy={checkBusy} setBusy={setCheckBusy} error={checkError} setError={setCheckError} onClose={() => setCheckTarget(null)} onSaveCandidate={async (result) => { const created = await saveTarget({ ...checkTarget, authenticity_risk: result.authenticity_risk }, result.verdict === 'CHECK' ? 'CHECK' : 'WATCHING'); if (created) setCheckTarget(null) }} />}
+    {preflightStep !== 'done' && <section className="hunter-preflight" aria-label="Rencana hunting">
+      <header><div><small>PREFLIGHT GRATIS · TANPA AI</small><h2>Rencana Hunting</h2></div>{destination && <span>{destination}</span>}</header>
+      {preflightStep === 'destination' && <><p>Hari ini mau hunting ke mana?</p><div className="hunter-preflight-options">{HUNTER_DESTINATIONS.map((place) => <button type="button" key={place.value} disabled={loading} onClick={() => void choosePreflight('destination', place.value, place.label)}>{place.label}</button>)}<button type="button" disabled={loading} onClick={() => { setQuestion(''); void choosePreflight('other_destination', undefined, '＋ Tempat lain') }}>＋ Tempat lain</button></div></>}
+      {preflightStep === 'budget' && <><p>Budget hunting hari ini berapa?</p><div className="hunter-preflight-options">{[['< Rp300k', 200000], ['Rp300–500k', 400000], ['Rp500k–1jt', 750000], ['> Rp1jt', 1500000], ['Bebas', null]].map(([label, value]) => <button type="button" key={label} disabled={loading} onClick={() => void choosePreflight('budget', value, label)}>{label}</button>)}</div></>}
+      {preflightStep === 'category' && <><p>Mau fokus cari apa?</p><div className="hunter-preflight-options">{[['Semua', []], ['Kaos', ['T-shirts']], ['Jaket', ['Jackets']], ['Sepatu', ['Shoes']], ['Tas / Aksesoris', ['Bags', 'Accessories']]].map(([label, value]) => <button type="button" key={label} disabled={loading} onClick={() => void choosePreflight('category', value, label)}>{label}</button>)}</div></>}
+      {preflightStep === 'market' && <><p>Target jualnya ke mana?</p><div className="hunter-preflight-options">{[['Lokal', 'local'], ['Internasional', 'international'], ['Keduanya', 'both']].map(([label, value]) => <button type="button" key={value} disabled={loading} onClick={() => void choosePreflight('market', value, label)}>{label}</button>)}</div></>}
+      {preflightStep === 'summary' && <><dl><div><dt>Lokasi</dt><dd>{destination || 'Belum dipilih'}</dd></div><div><dt>Budget</dt><dd>{budgetIdr ? moneyIdr(budgetIdr) : 'Bebas'}</dd></div><div><dt>Fokus</dt><dd>{categoryFocus.length ? categoryFocus.join(', ') : 'Semua kategori'}</dd></div><div><dt>Target pasar</dt><dd>{marketGoal === 'international' ? 'Internasional' : marketGoal === 'local' ? 'Lokal' : 'Keduanya'}</dd></div></dl><p className="hunter-preflight-cost">Research AI akan mencari data pasar terbaru. Stok fisik tidak dijamin; hasil adalah hipotesis sourcing. Research fresh akan dipakai dari cache 12 jam tanpa biaya baru.</p><div className="hunter-preflight-actions"><button type="button" className="hunter-preflight-edit" disabled={loading} onClick={() => { const decision = routeHunterInteraction({ action: 'edit', state: routerState() }); void applyRouterState(decision.state); appendLocalExchange('Ubah rencana', decision.reply) }}>Ubah</button><button type="button" className="hunter-preflight-start" disabled={!AI_ENABLED || loading || !destination} onClick={() => void confirmResearch()}>{loading ? 'Memeriksa…' : 'Mulai Research'}</button></div>{!AI_ENABLED && <small>AI belum diaktifkan untuk environment ini.</small>}</>}
+    </section>}
+    {hasCurrentBrief && <HunterBriefView briefRecord={brief} age={age} isHere={isHere} loading={loading} visibleTargets={visibleTargets} categories={categoryFocus} budgetIdr={budgetIdr} marketGoal={marketGoal} activeSection={activeSection} refreshPending={pendingRefresh} onRefresh={() => setPendingRefresh(true)} onConfirmRefresh={() => void confirmRefresh()} onCancelRefresh={() => setPendingRefresh(false)} onToggleHere={() => void toggleHere()} onSaveTarget={saveTarget} sourceCandidates={sourceCandidates} notSeen={notSeen} onNotSeen={markNotSeen} onCheck={(target) => { const decision = routeHunterInteraction({ action: 'item_check', state: routerState() }); if (decision.type === 'ITEM_CHECK') { setCheckTarget(target); setCheckFiles([]); setCheckPrice(''); setItemCheck(null); setCheckError('') } }} />}
+    <form className="hunter-composer" onSubmit={submitInput}><label className="sr-only" htmlFor="hunter-question">Tulis pesan ke AI Hunter</label><textarea id="hunter-question" rows="2" maxLength="1000" value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submitInput(event) } }} placeholder={preflightStep === 'destination' ? 'Tulis lokasi hunting…' : preflightStep === 'budget' ? 'Atau tulis budget, contoh 500 ribu…' : preflightStep === 'category' ? 'Atau tulis kategori, contoh jaket…' : preflightStep === 'market' ? 'Pilih lokal, internasional, atau keduanya…' : 'Tanya alasan atau perbandingan dari brief tersimpan…'} disabled={loading} /><button className="hunter-send" type="submit" disabled={loading || !question.trim()} aria-label="Kirim pesan">{loading ? '…' : 'Kirim ↑'}</button></form>
+    {hasCurrentBrief && <div className="hunter-suggested-filters"><button type="button" onClick={() => void choosePreflight('filter', { field: 'category', value: ['T-shirts', 'Jackets'] }, 'Kaos + jaket')}>Kaos + jaket</button><button type="button" onClick={() => void choosePreflight('filter', { field: 'budget', value: 300000 }, 'Budget Rp300k')}>Modal Rp300k</button><button type="button" onClick={() => void choosePreflight('filter', { field: 'market', value: marketGoal === 'international' ? 'both' : 'international' }, marketGoal === 'international' ? 'Tampilkan semua' : 'Internasional saja')}>{marketGoal === 'international' ? 'Tampilkan semua' : 'Internasional saja'}</button><button type="button" onClick={() => void choosePreflight('filter', { field: 'section', value: 'wildcard' }, 'Tampilkan wildcard')}>Wildcard</button><button type="button" onClick={() => void choosePreflight('filter', { field: 'section', value: 'priority' }, 'Prioritas utama')}>Prioritas</button><button type="button" onClick={() => void handleText('paling murah')}>Paling murah</button><button type="button" onClick={() => void choosePreflight('filter', { field: 'category', value: [] }, 'Semua kategori')}>Semua kategori</button><button type="button" onClick={() => void handleText('reset filter')}>Reset filter</button><button type="button" onClick={() => { const decision = routeHunterInteraction({ action: 'restart', state: routerState() }); void applyRouterState(decision.state); setPreflightStep('destination'); appendLocalExchange('Rencana baru', decision.reply) }}>Rencana baru</button></div>}
+    {checkTarget && <HunterItemCheckSheet target={checkTarget} destination={destination} sessionId={sessionId} briefId={brief?.id} files={checkFiles} setFiles={setCheckFiles} askingPrice={checkPrice} setAskingPrice={setCheckPrice} result={itemCheck} setResult={setItemCheck} busy={checkBusy} setBusy={setCheckBusy} error={checkError} setError={setCheckError} onClose={() => setCheckTarget(null)} onAnalyze={async (imageDataUrls) => analyzeItemThroughRouter({ feature: 'HUNTER_ITEM_CHECK', session_id: sessionId, message: 'Secondary in-location photo check', destination, asking_price_idr: Number(checkPrice), target: checkTarget ? { target_id: checkTarget.target_id, item_name: checkTarget.item_name, category: checkTarget.category, ideal_buy_high_idr: checkTarget.ideal_buy_high_idr, max_buy_price_idr: checkTarget.max_buy_price_idr, resale_low: checkTarget.resale_low, resale_high: checkTarget.resale_high, resale_currency: checkTarget.resale_currency, source_urls: checkTarget.source_urls } : null, brief_id: brief?.id, image_data_urls: imageDataUrls })} onSaveCandidate={async (result) => { const created = await saveTarget({ ...checkTarget, authenticity_risk: result.authenticity_risk }, result.verdict === 'CHECK' ? 'CHECK' : 'WATCHING'); if (created) setCheckTarget(null) }} />}
   </div>
 }
 
-function HunterBriefView({ briefRecord, age, isHere, visibleTargets, categories, budgetIdr, internationalOnly, onRefresh, onToggleHere, onSaveTarget, sourceCandidates, notSeen, onNotSeen, onCheck }) {
+function HunterBriefView({ briefRecord, age, isHere, loading, visibleTargets, categories, budgetIdr, marketGoal, activeSection, refreshPending, onRefresh, onConfirmRefresh, onCancelRefresh, onToggleHere, onSaveTarget, sourceCandidates, notSeen, onNotSeen, onCheck }) {
   const { brief, citations = [] } = briefRecord
   const sections = [
     ['priority', '🔥 Prioritas utama', 'TOP PRIORITY'],
@@ -305,9 +391,9 @@ function HunterBriefView({ briefRecord, age, isHere, visibleTargets, categories,
   return <section className="hunter-brief" aria-label="Destination hunting brief">
     <header className="hunter-brief-head"><div><span>HUNTING BRIEF</span><h2>{brief.destination_name || briefRecord.destination}</h2><p>Perkiraan sourcing · ketersediaan stok fisik tidak diverifikasi</p></div><div className="hunter-updated"><small>UPDATED / DIPERBARUI</small><strong>{age}</strong><small>{briefRecord.expires_at && new Date(briefRecord.expires_at) > new Date() ? 'Cache aktif 12 jam' : 'Cache kedaluwarsa'}</small></div></header>
     <div className="hunter-stock-caution"><b>SUMBER PUBLIK TERVERIFIKASI · STOK FISIK ADALAH PERKIRAAN</b><span>{brief.uncertainty_notice || 'Sumber publik mendukung riset pasar; ketersediaan di lokasi hari ini tidak terverifikasi.'}</span></div>
-    {(categories.length > 0 || budgetIdr || internationalOnly) && <div className="hunter-filter-note">Menampilkan {visibleCount} target dari riset yang sama{categories.length ? ` · ${categories.join(', ')}` : ''}{budgetIdr ? ` · budget ${moneyIdr(budgetIdr)}` : ''}{internationalOnly ? ' · international fit' : ''}. Tidak melakukan web search baru.</div>}
+    {(categories.length > 0 || budgetIdr || marketGoal !== 'both' || activeSection !== 'all') && <div className="hunter-filter-note">Menampilkan {visibleCount} target dari riset yang sama{categories.length ? ` · ${categories.join(', ')}` : ''}{budgetIdr ? ` · budget ${moneyIdr(budgetIdr)}` : ''}{marketGoal !== 'both' ? ` · pasar ${marketGoal}` : ''}{activeSection !== 'all' ? ` · bagian ${activeSection.replaceAll('_', ' ')}` : ''}. Tidak melakukan web search baru.</div>}
     {isHere && <div className="hunter-on-location"><span>MODE DI LOKASI / I’M HERE</span><p>Checklist cepat saat membongkar barang. Pilih “Ditemukan” untuk menyimpan ke Sourcing dengan status CHECK.</p></div>}
-    {sections.map(([key, title, label]) => {
+    {sections.filter(([key]) => activeSection === 'all' || activeSection === key).map(([key, title, label]) => {
       const targets = (brief.sections?.[key] || []).filter((target) => visibleIds.has(target.target_id))
       if (!targets.length) return null
       return <section className="hunter-target-section" key={key}><h3>{title}<small>{label}</small></h3><div className="hunter-target-list">{targets.map((target, index) => <HunterTargetCard key={target.target_id || `${key}-${index}`} target={target} citations={citations} section={key} isHere={isHere} saved={sourceCandidates[target.target_id]} notSeen={Boolean(notSeen[target.target_id])} onSave={() => onSaveTarget(target)} onFound={() => onSaveTarget(target, 'CHECK')} onNotSeen={() => onNotSeen(target)} onCheck={() => onCheck(target)} />)}</div></section>
@@ -316,7 +402,7 @@ function HunterBriefView({ briefRecord, age, isHere, visibleTargets, categories,
     {!!brief.new_discoveries?.length && <section className="hunter-discoveries"><h3>Barang yang mungkin belum kamu kenal<small>ITEMS WORTH LEARNING</small></h3><div className="hunter-discovery-list">{brief.new_discoveries.slice(0, 3).map((item, index) => <article key={`${item.name}-${index}`}><strong>{item.name}</strong><p>{item.what_it_is}</p><div><b>Ciri / quick ID:</b> {item.quick_identification}</div><div><b>Tag:</b> {(item.tags_to_check || []).join(', ') || '—'}</div><div><b>Fake risk:</b> {item.fake_risk}</div><div><b>Demand:</b> {item.demand_signal}</div><p>{item.why_learn}</p><SourceLinks urls={item.source_urls} citations={citations} /></article>)}</div></section>}
     {!!brief.internal_insights?.length && <section className="hunter-internal-insights"><h3>Insight Haqlooks / Internal signal</h3>{brief.internal_insights.map((insight, index) => <p key={index}>{insight}</p>)}</section>}
     <details className="hunter-sources"><summary>Sumber riset / Research sources ({citations.length})</summary><SourceLinks urls={citations.map((item) => item.url)} citations={citations} /></details>
-    <footer className="hunter-brief-actions"><button className={`hunter-here-button ${isHere ? 'active' : ''}`} type="button" onClick={onToggleHere}>{isHere ? '✓ Saya Sudah Sampai / I’m Here' : 'Saya Sudah Sampai / I’m Here'}</button><button type="button" className="hunter-refresh-button" onClick={onRefresh}>Perbarui Data / Refresh Research</button></footer>
+    <footer className="hunter-brief-actions"><button className={`hunter-here-button ${isHere ? 'active' : ''}`} type="button" onClick={onToggleHere}>{isHere ? '✓ Saya Sudah Sampai / I’m Here' : 'Saya Sudah Sampai / I’m Here'}</button>{refreshPending ? <div className="hunter-refresh-confirm"><span>Refresh dapat memakai AI dan mencari web baru.</span><button type="button" className="hunter-refresh-button" disabled={loading} onClick={onConfirmRefresh}>Konfirmasi Refresh</button><button type="button" className="hunter-preflight-edit" disabled={loading} onClick={onCancelRefresh}>Batal</button></div> : <button type="button" className="hunter-refresh-button" disabled={loading} onClick={onRefresh}>Perbarui Research</button>}</footer>
   </section>
 }
 
@@ -341,7 +427,7 @@ function SourceLinks({ urls = [], citations = [] }) {
   return <ul className="hunter-source-links">{urls.map((url) => { const source = sourceFor(url, citations); return <li key={url}><a href={source.url} target="_blank" rel="noreferrer">{source.title}</a></li> })}</ul>
 }
 
-function HunterItemCheckSheet({ target, destination, sessionId, briefId, files, setFiles, askingPrice, setAskingPrice, result, setResult, busy, setBusy, error, setError, onClose, onSaveCandidate }) {
+function HunterItemCheckSheet({ target, files, setFiles, askingPrice, setAskingPrice, result, setResult, busy, setBusy, error, setError, onClose, onAnalyze, onSaveCandidate }) {
   const [previews, setPreviews] = useState([])
   useEffect(() => { const urls = files.map((file) => URL.createObjectURL(file)); setPreviews(urls); return () => urls.forEach((url) => URL.revokeObjectURL(url)) }, [files])
   async function analyze(event) {
@@ -357,7 +443,7 @@ function HunterItemCheckSheet({ target, destination, sessionId, briefId, files, 
         const optimized = await resizeHunterPhoto(normalized)
         imageDataUrls.push(await photoDataUrl(optimized))
       }
-      const data = await callHunterFunction({ feature: 'HUNTER_ITEM_CHECK', session_id: sessionId, message: 'Secondary in-location photo check', destination, asking_price_idr: Number(askingPrice), target: target ? { target_id: target.target_id, item_name: target.item_name, category: target.category, ideal_buy_high_idr: target.ideal_buy_high_idr, max_buy_price_idr: target.max_buy_price_idr, resale_low: target.resale_low, resale_high: target.resale_high, resale_currency: target.resale_currency, source_urls: target.source_urls } : null, brief_id: briefId, image_data_urls: imageDataUrls })
+      const data = await onAnalyze(imageDataUrls)
       if (!data.result) throw new Error('Photo check did not return a valid assessment.')
       setResult(data.result)
     } catch (caught) { setError(errorMessage(caught, 'Foto belum bisa dianalisis.')) }

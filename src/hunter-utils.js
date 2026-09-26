@@ -56,7 +56,7 @@ export function detectHunterCategories(message = '') {
     ['Knitwear', ['knitwear', 'sweater', 'rajut']],
     ['Accessories', ['aksesoris', 'accessory', 'accessories']],
   ]
-  return aliases.filter(([, terms]) => terms.some((term) => value.includes(term))).map(([category]) => category)
+  return aliases.filter(([, terms]) => terms.some((term) => ` ${value} `.includes(` ${normalizeHunterText(term)} `))).map(([category]) => category)
 }
 
 export function buildHunterCacheKey(destination, category = 'all', date = new Date()) {
@@ -152,14 +152,27 @@ export function allHunterTargets(brief) {
   return ['priority', 'buy_if_cheap', 'wildcard', 'caution', 'avoid'].flatMap((section) => (sections[section] || []).map((target) => ({ ...target, _section: section })))
 }
 
-export function filterHunterTargets(brief, { categories = [], budgetIdr = null, internationalOnly = false } = {}) {
+export function filterHunterTargets(brief, { categories = [], budgetIdr = null, internationalOnly = false, marketGoal = 'both', activeSection = 'all' } = {}) {
   const categorySet = new Set(categories.map(normalizeHunterText))
   return allHunterTargets(brief).filter((target) => {
+    if (activeSection !== 'all' && target._section !== activeSection) return false
     if (categorySet.size && ![...categorySet].some((category) => normalizeHunterText(target.category || '').includes(category) || category.includes(normalizeHunterText(target.category || '')))) return false
     if (budgetIdr != null && target.ideal_buy_high_idr != null && target.ideal_buy_high_idr > budgetIdr) return false
-    if (internationalOnly && !['high', 'good'].includes(String(target.international_fit || '').toLowerCase())) return false
+    const goal = internationalOnly ? 'international' : marketGoal
+    if (goal === 'international' && !['high', 'good'].includes(String(target.international_fit || '').toLowerCase())) return false
+    if (goal === 'local') {
+      const fit = target.marketplace_fit || {}
+      const localFits = ['haqlooks', 'preloved', 'carousell', 'instagram'].map((name) => String(fit[name]?.fit || '').toLowerCase())
+      if (localFits.length && !localFits.some((value) => ['strong', 'good'].includes(value))) return false
+    }
     return true
   })
+}
+
+export function sortHunterTargets(targets, sort = 'best') {
+  const rows = [...targets]
+  if (sort === 'cheapest') return rows.sort((left, right) => (left.ideal_buy_high_idr ?? Number.MAX_SAFE_INTEGER) - (right.ideal_buy_high_idr ?? Number.MAX_SAFE_INTEGER))
+  return rows
 }
 
 export function summarizeHaqlooksData(products = [], sales = []) {

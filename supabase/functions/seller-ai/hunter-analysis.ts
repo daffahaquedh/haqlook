@@ -1,5 +1,7 @@
 import { DEFAULT_MODEL } from './pricing.ts'
 
+const HUNTER_CHAT_SYSTEM_PROMPT = `You are Haqlooks' concise sourcing copilot for a fashion reseller. Reply in Bahasa Indonesia using only the supplied brief context. Do not web-search, claim physical stock, invent sold prices, or claim authenticity. Only repeat prices and evidence included in context; otherwise state that evidence is insufficient. Give practical, concise reasoning and return the required JSON schema.`
+
 const stringArray = { type: 'array', items: { type: 'string' } }
 const nullableInteger = { type: ['integer', 'null'] }
 const marketplaceFitProperties = Object.fromEntries(['haqlooks', 'preloved', 'grailed', 'vestiaire', 'carousell', 'instagram'].map((name) => [name, {
@@ -137,14 +139,71 @@ export function createHunterBriefRequest({ destination, destinationType, previou
   }
 }
 
-export function createHunterChatRequest({ message, brief, conversation = [] }) {
+function normalizedChatText(value: unknown) {
+  return String(value || '').normalize('NFKC').toLocaleLowerCase('id-ID').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+}
+
+export function buildHunterChatContext({ brief, message, destination = '', budgetIdr = null, categories = [], marketGoal = 'both', activeBriefId = '', selectedTargetIds = [], activeSection = 'all', isHere = false }) {
+  const sections = brief?.sections && typeof brief.sections === 'object' ? brief.sections as Record<string, unknown> : {}
+  const targets = ['priority', 'buy_if_cheap', 'wildcard', 'caution', 'avoid'].flatMap((section) =>
+    (Array.isArray(sections[section]) ? sections[section] as Record<string, unknown>[] : []).map((target) => ({ ...target, _section: section })))
+  const query = normalizedChatText(message)
+  const tokens = query.split(' ').filter((token) => token.length >= 4)
+  const boundedSelectedIds = selectedTargetIds.slice(0, 3).map((value) => String(value).slice(0, 100))
+  const selectedIds = new Set(boundedSelectedIds)
+  const relevant = targets.map((target, index) => {
+    const searchable = normalizedChatText(`${target.item_name || ''} ${target.category || ''} ${target.why_search || ''}`)
+    const score = (selectedIds.has(String(target.target_id)) ? 100 : 0) + tokens.reduce((sum, token) => sum + (searchable.includes(token) ? 1 : 0), 0)
+    return { target, index, score }
+  }).filter((entry) => entry.score > 0)
+  const chosen = (relevant.length ? relevant.sort((a, b) => b.score - a.score || a.index - b.index).map((entry) => entry.target) : targets.slice(0, 3)).slice(0, 3)
+  const citations = Array.isArray(brief?.citations) ? brief.citations as Record<string, unknown>[] : []
+  const selectedTargets = chosen.map((target) => {
+    const sourceUrls = Array.isArray(target.source_urls) ? target.source_urls.map(String).slice(0, 3) : []
+    const fit = target.marketplace_fit && typeof target.marketplace_fit === 'object'
+      ? Object.fromEntries(Object.entries(target.marketplace_fit as Record<string, unknown>).map(([marketplace, rawFit]) => {
+        const row = rawFit && typeof rawFit === 'object' ? rawFit as Record<string, unknown> : {}
+        return [marketplace, { fit: String(row.fit || 'unknown'), reason: String(row.reason || '').slice(0, 140) }]
+      }))
+      : undefined
+    return {
+      target_id: String(target.target_id || '').slice(0, 100),
+      section: String(target._section || ''),
+      item_name: String(target.item_name || '').slice(0, 160),
+      category: String(target.category || '').slice(0, 80),
+      why_search: String(target.why_search || '').slice(0, 280),
+      ideal_buy_low_idr: target.ideal_buy_low_idr ?? null,
+      ideal_buy_high_idr: target.ideal_buy_high_idr ?? null,
+      resale_low: target.resale_low ?? null,
+      resale_high: target.resale_high ?? null,
+      resale_currency: String(target.resale_currency || 'UNKNOWN'),
+      market_evidence_summary: String(target.market_evidence_summary || '').slice(0, 300),
+      marketplace_fit: fit,
+      international_fit: String(target.international_fit || 'unknown'),
+      authenticity_risk: String(target.authenticity_risk || '').slice(0, 240),
+      sources: citations.filter((citation) => sourceUrls.includes(String(citation.url))).slice(0, 3).map((citation) => ({ title: String(citation.title || '').slice(0, 180), url: String(citation.url || '').slice(0, 500) })),
+    }
+  })
+  return {
+    destination: String(destination || brief?.destination_name || '').slice(0, 100),
+    session_state: { active_brief_id: String(activeBriefId || '').slice(0, 80), selected_target_ids: boundedSelectedIds, active_section: activeSection, is_here: Boolean(isHere) },
+    seller_constraints: { budget_idr: budgetIdr, categories: categories.slice(0, 7), market_goal: marketGoal },
+    relevant_targets: selectedTargets,
+  }
+}
+
+export function isHunterReasoningQuestion(message: unknown) {
+  return /\b(kenapa|mengapa|bandingkan|compare|worth(?: it)?|risiko|kondisi|lebih bagus|lebih cocok|pemula|alasan|masih layak)\b/i.test(String(message || ''))
+}
+
+export function createHunterChatRequest({ message, context }) {
   return {
     model: DEFAULT_MODEL,
     reasoning: { effort: 'low' },
     max_output_tokens: 900,
     input: [
-      { role: 'system', content: `${HUNTER_SYSTEM_PROMPT}\nYou are in chat mode: do not use web search or pretend you searched. The supplied brief is the only market research context. If it lacks evidence, say so. Never re-quote a price range without its cited context. If the seller changes budget/focus, filter/rank only existing targets. Do not claim physical stock.` },
-      { role: 'user', content: `CURRENT DESTINATION BRIEF (may be null): ${JSON.stringify(brief || null)}\nRECENT SESSION CONTEXT: ${JSON.stringify(conversation.slice(-12))}\nSELLER MESSAGE: ${String(message).slice(0, 1000)}` },
+      { role: 'system', content: HUNTER_CHAT_SYSTEM_PROMPT },
+      { role: 'user', content: `COMPACT RESEARCH CONTEXT: ${JSON.stringify(context || { relevant_targets: [] })}\nSELLER MESSAGE: ${String(message).slice(0, 1000)}` },
     ],
     text: { format: { type: 'json_schema', name: 'hunter_chat_reply', strict: true, schema: HUNTER_CHAT_SCHEMA } },
   }

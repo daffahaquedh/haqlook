@@ -93,8 +93,7 @@ Deno.serve(async (request) => {
   if (!body) return errorResponse('INVALID_REQUEST', 'Request body must be valid JSON.', 400)
   const openAiKey = Deno.env.get('OPENAI_API_KEY')
   if (String(body.feature || '').startsWith('HUNTER_')) {
-    if (!openAiKey) return errorResponse('AI_NOT_CONFIGURED', 'AI belum diaktifkan di server. Sourcing manual tetap tersedia.', 503)
-    return handleHunterRequest({ supabase, user, role, body, openAiKey, supabaseUrl, corsHeaders })
+    return handleHunterRequest({ supabase, user, role, body, openAiKey: openAiKey || '', supabaseUrl, corsHeaders })
   }
   if (!openAiKey) return errorResponse('AI_NOT_CONFIGURED', 'AI belum diaktifkan di server. Inventory tetap dapat digunakan.', 503)
   if (body.feature !== 'ITEM_ANALYSIS') return errorResponse('INVALID_FEATURE', 'Only ITEM_ANALYSIS and Hunter features are enabled.', 400)

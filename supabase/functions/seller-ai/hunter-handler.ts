@@ -1,7 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { DEFAULT_MODEL, estimateHunterCostIdr, hunterReservationCostIdr } from './pricing.ts'
-import { createHunterBriefRequest, createHunterChatRequest, createHunterItemCheckRequest, HUNTER_OPENAI_TIMEOUT_MS } from './hunter-analysis.ts'
-import { countWebSearchCalls, extractHunterCitations, findHunterTarget, hunterResponseMetrics, parseCompletedHunterJson, responsesOutputText, sanitizeHunterBrief, summarizeHaqlooksData } from './hunter-utils.ts'
+import { buildHunterChatContext, createHunterBriefRequest, createHunterChatRequest, createHunterItemCheckRequest, HUNTER_OPENAI_TIMEOUT_MS, isHunterReasoningQuestion } from './hunter-analysis.ts'
+import { countWebSearchCalls, extractHunterCitations, findHunterTarget, hunterResearchDecision, hunterResponseMetrics, parseCompletedHunterJson, responsesOutputText, sanitizeHunterBrief, shouldReadHunterCache, summarizeHaqlooksData } from './hunter-utils.ts'
 
 type AnyClient = ReturnType<typeof createClient>
 type HunterUser = { id: string; email?: string | null }
@@ -189,16 +189,20 @@ async function handleResearch(input: HandlerInput, client: AnyClient, admin: Any
   const destination = safeDestination(input.body.destination || searchDestination(message) || session.destination)
   if (!destination) return failure('DESTINATION_REQUIRED', 'Sebutkan market atau tempat hunting yang ingin diteliti.', 400, input.corsHeaders)
   const key = cacheKey(destination)
-  if (feature !== 'HUNTER_REFRESH') {
+  if (shouldReadHunterCache(feature)) {
     const { data: cached } = await admin.from('hunter_briefs').select('id,destination,category_focus,brief_json,citations,model,created_at,expires_at,search_calls,input_tokens,output_tokens').eq('cache_key', key).gt('expires_at', new Date().toISOString()).maybeSingle()
-    if (cached) {
+    if (cached && hunterResearchDecision(feature, input.body.research_confirmed === true, true) === 'LOAD_CACHE') {
       const summary = `${cached.brief_json?.destination_name || destination} için ${Object.values(cached.brief_json?.sections || {}).flat().length} sourcing target siap. Sumber terverifikasi tersedia di bawah; stok fisik hari ini tidak dapat dipastikan.`
+      const cachedAge = Math.max(0, Math.round((Date.now() - new Date(cached.created_at).getTime()) / 3_600_000))
+      const cacheMessage = `Research ${cachedAge} jam lalu masih fresh—tidak perlu search ulang. ${summary}`
       await updateSession(client, String(session.id), { destination })
       await saveMessage(client, input.user, String(session.id), 'user', message, 'chat', {})
-      await saveMessage(client, input.user, String(session.id), 'assistant', summary, 'brief', { brief_id: cached.id, cache_hit: true })
-      return jsonResponse({ ok: true, feature: 'HUNTER_DESTINATION_BRIEF', session_id: session.id, destination, assistant_message: summary, brief_id: cached.id, cached: true, brief: { id: cached.id, destination: cached.destination, brief: cached.brief_json, citations: cached.citations || [], created_at: cached.created_at, expires_at: cached.expires_at } }, 200, input.corsHeaders)
+      await saveMessage(client, input.user, String(session.id), 'assistant', cacheMessage, 'brief', { brief_id: cached.id, cache_hit: true })
+      return jsonResponse({ ok: true, feature: 'HUNTER_DESTINATION_BRIEF', session_id: session.id, destination, assistant_message: cacheMessage, brief_id: cached.id, cached: true, cache_age_hours: cachedAge, brief: { id: cached.id, destination: cached.destination, brief: cached.brief_json, citations: cached.citations || [], created_at: cached.created_at, expires_at: cached.expires_at } }, 200, input.corsHeaders)
     }
   }
+
+  if (!input.openAiKey) return failure('AI_NOT_CONFIGURED', 'AI belum dikonfigurasi di server. Brief cache yang masih aktif tetap bisa digunakan.', 503, input.corsHeaders)
 
   const conversation = await getConversation(client, String(session.id))
   const internalSummary = await getInternalSummary(client)
@@ -255,19 +259,31 @@ async function handleChat(input: HandlerInput, client: AnyClient, admin: AnyClie
     const { data } = await admin.from('hunter_briefs').select('brief_json,citations').eq('id', briefId).maybeSingle()
     if (data) brief = { ...data.brief_json, citations: data.citations || [] }
   }
-  const conversation = await getConversation(client, String(session.id))
   const safeMessage = redactChatText(message)
   const allowedCategories = new Set(['T-shirts', 'Jackets', 'Shoes', 'Bags', 'Denim', 'Knitwear', 'Accessories'])
   const rawCategories = Array.isArray(input.body.category_focus) ? input.body.category_focus : Array.isArray(session.category_focus) ? session.category_focus : []
   const requestedCategories = [...new Set(rawCategories.map(String).filter((value) => allowedCategories.has(value)))].slice(0, 7)
   const requestedBudget = idrValue(input.body.budget_idr) ?? idrValue(session.budget_idr)
+  const requestedMarketGoal = ['local', 'international', 'both'].includes(String(input.body.market_goal || '')) ? String(input.body.market_goal) : 'both'
+  const requestedSection = ['all', 'priority', 'buy_if_cheap', 'wildcard', 'caution', 'avoid'].includes(String(input.body.active_section || '')) ? String(input.body.active_section) : 'all'
   const feature = 'HUNTER_CHAT'
   let usageId = ''
   let providerResponded = false
   try {
     usageId = await reserveUsage(client, feature, DEFAULT_MODEL, 'low', hunterReservationCostIdr(DEFAULT_MODEL, 'chat'), { destination: String(session.destination || ''), mode: 'no_web_search' })
-    const chatContext = `${safeMessage}\nCurrent seller focus: ${requestedCategories.join(', ') || 'all categories'}. Current purchase budget IDR: ${requestedBudget ?? 'not specified'}.`
-    const payload = await fetchOpenAi(createHunterChatRequest({ message: chatContext, brief, conversation }), input.openAiKey)
+    const chatContext = buildHunterChatContext({
+      brief,
+      message: safeMessage,
+      destination: String(session.destination || ''),
+      budgetIdr: requestedBudget,
+      categories: requestedCategories,
+      marketGoal: requestedMarketGoal,
+      activeBriefId: briefId,
+      isHere: Boolean(session.is_here),
+      activeSection: requestedSection,
+      selectedTargetIds: Array.isArray(input.body.selected_target_ids) ? input.body.selected_target_ids.slice(0, 3).map(String) : [],
+    })
+    const payload = await fetchOpenAi(createHunterChatRequest({ message: safeMessage, context: chatContext }), input.openAiKey)
     providerResponded = true
     let result: Record<string, unknown>
     try { result = parseJsonOutput(payload) as Record<string, unknown> } catch {
@@ -355,6 +371,9 @@ export async function handleHunterRequest(input: HandlerInput) {
   const feature = String(input.body.feature || '')
   if (!HUNTER_FEATURES.has(feature)) return failure('INVALID_FEATURE', 'Hunter feature is not enabled.', 400, input.corsHeaders)
   if (!['ADMIN', 'SELLER'].includes(String(input.role).toUpperCase())) return failure('ROLE_NOT_ALLOWED', 'This action is limited to ADMIN and SELLER accounts.', 403, input.corsHeaders)
+  if ((feature === 'HUNTER_DESTINATION_BRIEF' || feature === 'HUNTER_REFRESH') && hunterResearchDecision(feature, input.body.research_confirmed === true, false) === 'CONFIRMATION_REQUIRED') return failure('HUNTER_CONFIRMATION_REQUIRED', 'Tinjau rencana hunting dan tekan Mulai Research sebelum pencarian pasar dijalankan.', 428, input.corsHeaders)
+  if (feature === 'HUNTER_CHAT' && !isHunterReasoningQuestion(input.body.message)) return failure('HUNTER_LOCAL_ACTION_REQUIRED', 'Interaksi singkat harus diproses secara lokal. Kirim pertanyaan penalaran yang jelas untuk memakai Hunter Chat.', 400, input.corsHeaders)
+  if (!input.openAiKey && (feature === 'HUNTER_CHAT' || feature === 'HUNTER_ITEM_CHECK')) return failure('AI_NOT_CONFIGURED', 'AI belum dikonfigurasi di server. Sourcing manual tetap tersedia.', 503, input.corsHeaders)
   const admin = serverClient(input.supabaseUrl)
   if (!admin) return failure('SERVER_DATABASE_NOT_CONFIGURED', 'Hunter server-side storage is not configured.', 503, input.corsHeaders)
 
@@ -362,6 +381,7 @@ export async function handleHunterRequest(input: HandlerInput) {
   try { session = await getOrCreateSession(input.supabase, input.user, input.body.session_id) } catch { return failure('HUNTER_SESSION_UNAVAILABLE', 'The Hunter session could not be loaded. Refresh Seller Panel and retry.', 403, input.corsHeaders) }
   const message = redactChatText(input.body.message)
   const isItemCheck = feature === 'HUNTER_ITEM_CHECK'
+  if (feature === 'HUNTER_CHAT' && !(await currentBriefId(input.supabase, String(session.id)))) return failure('HUNTER_BRIEF_REQUIRED', 'Buat atau muat Destination Brief sebelum meminta penjelasan Hunter Chat.', 409, input.corsHeaders)
   const destination = safeDestination(input.body.destination || searchDestination(message) || session.destination)
   if (destination && destination !== String(session.destination || '')) await updateSession(input.supabase, String(session.id), { destination })
   if (feature === 'HUNTER_DESTINATION_BRIEF' || feature === 'HUNTER_REFRESH') return handleResearch(input, input.supabase, admin, session, feature, message)

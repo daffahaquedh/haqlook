@@ -9,6 +9,16 @@ export function responsesOutputText(payload: Record<string, unknown>) {
   return ''
 }
 
+export function hunterResearchDecision(feature: string, confirmed: boolean, cacheFresh: boolean) {
+  if (!confirmed) return 'CONFIRMATION_REQUIRED'
+  if (feature === 'HUNTER_REFRESH') return 'REFRESH_RESEARCH'
+  return cacheFresh ? 'LOAD_CACHE' : 'START_RESEARCH'
+}
+
+export function shouldReadHunterCache(feature: string) {
+  return feature !== 'HUNTER_REFRESH'
+}
+
 function hunterError(code: string) {
   return Object.assign(new Error(code), { code })
 }
