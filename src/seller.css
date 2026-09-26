@@ -246,7 +246,7 @@
 .listing-info .listing-note{display:-webkit-box;min-width:0;max-width:100%;margin:3px 0 0;overflow:hidden;color:#849289;font-size:.65rem;line-height:1.4;overflow-wrap:anywhere;white-space:normal;word-break:break-word;text-overflow:ellipsis;-webkit-box-orient:vertical;-webkit-line-clamp:3}
 .listing-summary{display:grid;justify-items:end;align-content:center;gap:8px;min-width:0}
 .listing-summary .listing-status{max-width:100%;white-space:normal;overflow-wrap:anywhere;text-align:center}
-.listing-summary small{max-width:100%;color:#efe6d2;font-size:.75rem;font-weight:800;line-height:1.35;text-align:right;white-space:normal;overflow-wrap:anywhere}
+.listing-summary small{display:block;max-width:100%;color:#efe6d2;font-size:.75rem;font-weight:800;line-height:1.35;text-align:right;white-space:normal;overflow-wrap:anywhere}
 .listing-actions{display:flex;flex-wrap:wrap;gap:4px 8px;min-width:0}
 .listing-action-link{display:inline-flex;align-items:center;gap:5px;min-height:44px;padding:0 2px;color:#df9b55;font-size:.65rem;font-weight:800;line-height:1.3;overflow-wrap:anywhere}
 .listing-active-warning{display:block;min-width:0;color:#e2a363;font-size:.63rem;line-height:1.4;overflow-wrap:anywhere;white-space:normal}
