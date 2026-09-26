@@ -19,27 +19,52 @@ export const ITEM_ANALYSIS_SUGGESTIONS = [
   { key: 'seller_notes', label: 'Catatan untuk seller', labelEn: 'Seller notes', target: 'description' },
 ]
 
-export const SELLER_WORKSPACE_LINKS = [
-  ['/seller', 'Dashboard', '⌂'],
-  ['/seller/inventory', 'Inventory', '▣'],
-  ['/seller/inventory/new', 'Add item', '+'],
-  ['/seller/ai-hunter', 'AI Hunter', '✦'],
-  ['/seller/sourcing', 'Sourcing', '◌'],
-  ['/seller/listings', 'Listings', '↗'],
-  ['/seller/sales', 'Sales', '◎'],
+export const SELLER_WORKSPACE_GROUPS = [
+  { label: 'OPERASIONAL', links: [['/seller', 'Beranda', '⌂'], ['/seller/inventory', 'Barang', '▣']] },
+  { label: 'HUNTING', links: [['/seller/ai-hunter', 'Riset', '✦'], ['/seller/sourcing', 'Temuan tersimpan', '◌']] },
+  { label: 'JUALAN', links: [['/seller/listings', 'Listing', '↗'], ['/seller/sales', 'Terjual', '◎']] },
 ]
 
-export const ADMIN_WORKSPACE_LINKS = [
-  ['/seller/analytics', 'Analytics', '▤'],
-  ['/seller/hunter-analytics', 'Hunter Analytics', '⌕'],
-  ['/seller/ai-usage', 'AI Usage', '◒'],
-  ['/seller/users-roles', 'Users / Roles', '♙'],
-  ['/seller/marketplace-settings', 'Marketplace Settings', '↗'],
-  ['/seller/settings', 'AI Settings', '⚙'],
-  ['/seller/app-settings', 'App Settings', '⌘'],
+export const ADMIN_WORKSPACE_GROUPS = [
+  ...SELLER_WORKSPACE_GROUPS,
+  { label: 'INSIGHT', links: [['/seller/analytics', 'Ringkasan bisnis', '▤'], ['/seller/hunter-analytics', 'Hunter', '⌕'], ['/seller/ai-usage', 'Penggunaan AI', '◒']] },
+  { label: 'PENGATURAN', links: [['/seller/settings', 'AI & Anggaran', '⚙']] },
 ]
+
+export const SELLER_MOBILE_PRIMARY_LINKS = [
+  ['/seller', 'Beranda', '⌂'],
+  ['/seller/inventory', 'Barang', '▣'],
+  ['/seller/ai-hunter', 'Hunting', '✦'],
+  ['/seller/listings', 'Jualan', '↗'],
+]
+
+export const SELLER_MOBILE_MORE_GROUPS = [
+  { label: 'HUNTING', links: [['/seller/sourcing', 'Temuan tersimpan', '◌']] },
+  { label: 'JUALAN', links: [['/seller/sales', 'Terjual', '◎']] },
+]
+
+export const SELLER_WORKSPACE_LINKS = SELLER_WORKSPACE_GROUPS.flatMap(({ links }) => links)
+export const ADMIN_WORKSPACE_LINKS = ADMIN_WORKSPACE_GROUPS.slice(SELLER_WORKSPACE_GROUPS.length).flatMap(({ links }) => links)
 
 export const ADMIN_ONLY_SECTIONS = ['analytics', 'hunter-analytics', 'ai-usage', 'users-roles', 'marketplace-settings', 'settings', 'app-settings']
+
+export function workspaceNavigationGroupsForRole(role) {
+  return String(role || '').toUpperCase() === 'ADMIN' ? ADMIN_WORKSPACE_GROUPS : SELLER_WORKSPACE_GROUPS
+}
+
+export function workspaceMobileMoreGroupsForRole(role) {
+  return String(role || '').toUpperCase() === 'ADMIN'
+    ? [...SELLER_MOBILE_MORE_GROUPS, ...ADMIN_WORKSPACE_GROUPS.slice(SELLER_WORKSPACE_GROUPS.length)]
+    : SELLER_MOBILE_MORE_GROUPS
+}
+
+export function workspacePathIsActive(path, href) {
+  if (href === '/seller') return path === href
+  if (href === '/seller/inventory') return path.startsWith(href)
+  if (href === '/seller/ai-hunter') return path === href || path === '/seller/sourcing'
+  if (href === '/seller/listings') return path === href || path === '/seller/sales'
+  return path === href || path.startsWith(`${href}/`)
+}
 
 export function workspaceLinksForRole(role) {
   return String(role || '').toUpperCase() === 'ADMIN'
