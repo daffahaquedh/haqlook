@@ -4,6 +4,7 @@ import { DEFAULT_MODEL, estimateCostIdr, maxOutputTokens, reservationCostIdr } f
 import { ITEM_ANALYSIS_SCHEMA, normalizeItemAnalysis } from './analysis-schema.ts'
 import { createItemAnalysisRequest } from './analysis-request.js'
 import { handleHunterRequest } from './hunter-handler.ts'
+import { handleListingGeneration } from './listing-generation.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -95,8 +96,11 @@ Deno.serve(async (request) => {
   if (String(body.feature || '').startsWith('HUNTER_')) {
     return handleHunterRequest({ supabase, user, role, body, openAiKey: openAiKey || '', supabaseUrl, corsHeaders })
   }
+  if (body.feature === 'LISTING_GENERATION') {
+    return handleListingGeneration({ supabase, user, body, openAiKey: openAiKey || '', corsHeaders })
+  }
   if (!openAiKey) return errorResponse('AI_NOT_CONFIGURED', 'AI belum diaktifkan di server. Inventory tetap dapat digunakan.', 503)
-  if (body.feature !== 'ITEM_ANALYSIS') return errorResponse('INVALID_FEATURE', 'Only ITEM_ANALYSIS and Hunter features are enabled.', 400)
+  if (body.feature !== 'ITEM_ANALYSIS') return errorResponse('INVALID_FEATURE', 'Only ITEM_ANALYSIS, LISTING_GENERATION, and Hunter features are enabled.', 400)
   const productId = typeof body.product_id === 'string' ? body.product_id : ''
   if (!productId) return errorResponse('PRODUCT_REQUIRED', 'Save the item before running AI Analyze.', 400)
 

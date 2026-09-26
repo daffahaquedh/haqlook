@@ -38,6 +38,16 @@ export function reservationCostIdr(model: string) {
   return estimateCostIdr(model, maxInputTokens, maxOutputTokens)
 }
 
+export function listingReservationCostIdr(model: string) {
+  const maxInputTokens = configuredNumber('AI_LISTING_MAX_INPUT_TOKENS', 20000)
+  const maxOutputTokens = configuredNumber('AI_LISTING_MAX_OUTPUT_TOKENS', 6000)
+  return estimateCostIdr(model, maxInputTokens, maxOutputTokens)
+}
+
+export function maxListingOutputTokens() {
+  return Math.max(1200, Math.floor(configuredNumber('AI_LISTING_MAX_OUTPUT_TOKENS', 6000)))
+}
+
 export function estimateHunterCostIdr(model: string, inputTokens: number, outputTokens: number, cachedInputTokens = 0, webSearchCalls = 0) {
   const tokenCost = estimateCostIdr(model, inputTokens, outputTokens, cachedInputTokens)
   const webSearchUsdPer1k = configuredNumber('OPENAI_WEB_SEARCH_USD_PER_1K_CALLS', 10)

@@ -24,7 +24,7 @@ test('ADMIN workspace includes every seller route and admin tools', () => {
   const links = workspaceLinksForRole('ADMIN')
   for (const [href] of SELLER_WORKSPACE_LINKS) assert.ok(links.some(([candidate]) => candidate === href))
   for (const [href] of ADMIN_WORKSPACE_LINKS) assert.ok(links.some(([candidate]) => candidate === href))
-  assert.deepEqual(ADMIN_ONLY_SECTIONS, ['analytics', 'ai-usage', 'users-roles', 'marketplace-settings', 'settings', 'app-settings'])
+  assert.deepEqual(ADMIN_ONLY_SECTIONS, ['analytics', 'hunter-analytics', 'ai-usage', 'users-roles', 'marketplace-settings', 'settings', 'app-settings'])
 })
 
 test('SELLER workspace omits admin menus and cannot enter admin-only sections', () => {

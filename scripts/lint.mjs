@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 
-const files = ['src/main.jsx', 'src/seller.jsx', 'src/hunter.jsx', 'src/seller-utils.js', 'src/supabase-client.js']
+const files = ['src/main.jsx', 'src/seller.jsx', 'src/hunter.jsx', 'src/listing-generator.jsx', 'src/seller-utils.js', 'src/listing-utils.js', 'src/supabase-client.js', 'supabase/functions/seller-ai/listing-generation.ts']
 const forbidden = [
   { pattern: /dangerouslySetInnerHTML/, message: 'raw HTML injection is not allowed in the seller surface' },
   { pattern: /VITE_OPENAI|VITE_.*SERVICE_ROLE/i, message: 'private credentials must not be exposed as VITE variables' },
