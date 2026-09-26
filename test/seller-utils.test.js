@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { ADMIN_ONLY_SECTIONS, ADMIN_WORKSPACE_GROUPS, ADMIN_WORKSPACE_LINKS, budgetLabel, budgetTone, calculateProfit, canAccessWorkspaceSection, safeHttpUrl, SELLER_MOBILE_MORE_GROUPS, SELLER_MOBILE_PRIMARY_LINKS, SELLER_WORKSPACE_GROUPS, SELLER_WORKSPACE_LINKS, workspaceLinksForRole, workspaceMobileMoreGroupsForRole, workspaceNavigationGroupsForRole, workspacePathIsActive, workspacePathForLegacyAdmin } from '../src/seller-utils.js'
+import { ADMIN_ONLY_SECTIONS, ADMIN_WORKSPACE_GROUPS, ADMIN_WORKSPACE_LINKS, budgetLabel, budgetTone, calculateProfit, canAccessWorkspaceSection, huntingPathForTab, huntingTabForPath, safeHttpUrl, SELLER_MOBILE_MORE_GROUPS, SELLER_MOBILE_PRIMARY_LINKS, SELLER_WORKSPACE_GROUPS, SELLER_WORKSPACE_LINKS, sourcingCandidateCanMoveToInventory, sourcingCandidateIsInInventory, sourcingCandidateStatusLabel, workspaceLinksForRole, workspaceMobileMoreGroupsForRole, workspaceNavigationGroupsForRole, workspacePathIsActive, workspacePathForLegacyAdmin } from '../src/seller-utils.js'
 
 test('calculateProfit returns gross and net profit', () => {
   assert.deepEqual(calculateProfit({ salePrice: 2250000, purchasePrice: 750000, marketplaceFee: 100000, paymentFee: 25000, shippingSubsidy: 50000, otherCost: 10000 }), { grossProfit: 1500000, netProfit: 1315000 })
@@ -39,7 +39,7 @@ test('seller navigation uses the approved Indonesian operational groups without 
   assert.deepEqual(SELLER_WORKSPACE_GROUPS.map(({ label }) => label), ['OPERASIONAL', 'HUNTING', 'JUALAN'])
   assert.deepEqual(SELLER_WORKSPACE_LINKS.map(([href, label]) => [href, label]), [
     ['/seller', 'Beranda'], ['/seller/inventory', 'Barang'],
-    ['/seller/ai-hunter', 'Riset'], ['/seller/sourcing', 'Temuan tersimpan'],
+    ['/seller/ai-hunter', 'Hunting'],
     ['/seller/listings', 'Listing'], ['/seller/sales', 'Terjual'],
   ])
   assert.equal(SELLER_WORKSPACE_LINKS.some(([href]) => href === '/seller/inventory/new'), false)
@@ -47,11 +47,10 @@ test('seller navigation uses the approved Indonesian operational groups without 
 
 test('mobile navigation has five destinations and keeps Add Item contextual', () => {
   assert.deepEqual(SELLER_MOBILE_PRIMARY_LINKS.map(([, label]) => label), ['Beranda', 'Barang', 'Hunting', 'Jualan'])
-  assert.deepEqual(SELLER_MOBILE_MORE_GROUPS.map(({ label }) => label), ['HUNTING', 'JUALAN'])
+  assert.deepEqual(SELLER_MOBILE_MORE_GROUPS.map(({ label }) => label), ['JUALAN'])
   assert.deepEqual(workspaceMobileMoreGroupsForRole('SELLER'), SELLER_MOBILE_MORE_GROUPS)
   const visibleSellerRoutes = [...SELLER_MOBILE_PRIMARY_LINKS, ...SELLER_MOBILE_MORE_GROUPS.flatMap(({ links }) => links)]
   assert.equal(visibleSellerRoutes.some(([href]) => href === '/seller/inventory/new'), false)
-  assert.ok(visibleSellerRoutes.some(([href]) => href === '/seller/sourcing'))
   assert.ok(visibleSellerRoutes.some(([href]) => href === '/seller/sales'))
 })
 
@@ -64,19 +63,42 @@ test('admin navigation adds only active insight and AI budget destinations', () 
   const routes = workspaceLinksForRole('ADMIN').map(([href]) => href)
   for (const unfinished of ['/seller/users-roles', '/seller/marketplace-settings', '/seller/app-settings']) assert.equal(routes.includes(unfinished), false)
   assert.deepEqual(workspaceNavigationGroupsForRole('SELLER'), SELLER_WORKSPACE_GROUPS)
-  assert.deepEqual(workspaceMobileMoreGroupsForRole('ADMIN').map(({ label }) => label), ['HUNTING', 'JUALAN', 'INSIGHT', 'PENGATURAN'])
+  assert.deepEqual(workspaceMobileMoreGroupsForRole('ADMIN').map(({ label }) => label), ['JUALAN', 'INSIGHT', 'PENGATURAN'])
 })
 
 test('active navigation follows legacy deep links and keeps contextual Add under Barang', () => {
   assert.equal(workspacePathIsActive('/seller', '/seller'), true)
   assert.equal(workspacePathIsActive('/seller/inventory/new', '/seller/inventory'), true)
   assert.equal(workspacePathIsActive('/seller/sourcing', '/seller/ai-hunter'), true)
+  assert.equal(workspacePathIsActive('/seller/ai-hunter', '/seller/ai-hunter'), true)
   assert.equal(workspacePathIsActive('/seller/sales', '/seller/listings'), true)
   assert.equal(workspacePathIsActive('/seller/inventory', '/seller'), false)
   assert.equal(workspacePathIsActive('/seller/ai-usage', '/seller/ai-usage'), true)
+})
+
+test('Hunting legacy routes select matching workspace view and remain direct-link compatible', () => {
+  assert.equal(huntingTabForPath('/seller/ai-hunter'), 'research')
+  assert.equal(huntingTabForPath('/seller/sourcing'), 'finds')
+  assert.equal(huntingPathForTab('research'), '/seller/ai-hunter')
+  assert.equal(huntingPathForTab('finds'), '/seller/sourcing')
+})
+
+test('existing sourcing statuses receive seller labels without changing database values', () => {
+  assert.deepEqual(['WATCHING', 'CHECK', 'NEGOTIATING', 'BOUGHT', 'SKIPPED'].map(sourcingCandidateStatusLabel), [
+    'Dipantau', 'Perlu dicek', 'Negosiasi', 'Dibeli', 'Dilewati',
+  ])
+})
+
+test('only a bought, not-yet-converted candidate offers inventory conversion', () => {
+  assert.equal(sourcingCandidateCanMoveToInventory({ status: 'BOUGHT', product_id: null }), true)
+  assert.equal(sourcingCandidateCanMoveToInventory({ status: 'WATCHING', product_id: null }), false)
+  assert.equal(sourcingCandidateCanMoveToInventory({ status: 'BOUGHT', product_id: 'product-1' }), false)
+  assert.equal(sourcingCandidateIsInInventory({ status: 'BOUGHT', product_id: 'product-1' }), true)
+  assert.equal(sourcingCandidateIsInInventory({ status: 'BOUGHT', product_id: null }), false)
 })
 
 test('legacy /admin URL maps into the shared workspace', () => {
   assert.equal(workspacePathForLegacyAdmin('/admin'), '/seller')
   assert.equal(workspacePathForLegacyAdmin('/seller/inventory'), '/seller/inventory')
 })
+

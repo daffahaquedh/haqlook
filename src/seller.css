@@ -235,6 +235,72 @@
     body:has(.seller-app select:focus) .seller-mobile-nav{transform:translateY(110%);transition:transform .18s ease}
   }
 }
+
+/* Phase 3: keep Research and saved finds inside one route-compatible Hunting workspace. */
+.hunting-workspace{width:min(100%,1120px);min-width:0;margin:0 auto}
+.hunting-workspace-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin:0 0 15px}
+.hunting-workspace-heading h1{margin:7px 0 0;color:#efe6d2;font:900 clamp(2.15rem,4vw,3.25rem)/.92 Georgia,'Times New Roman',serif;letter-spacing:-.07em}
+.hunting-workspace-heading p{margin:9px 0 0;color:#98a59b;font-size:.78rem;line-height:1.45}
+.hunting-workspace-tabs{position:relative;z-index:25;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin:0 0 15px;padding:5px;border:1px solid #293a30;border-radius:6px;background:#0f1511}
+.hunting-workspace-tabs a{min-width:0;min-height:52px;display:flex;align-items:center;justify-content:center;gap:9px;padding:8px 14px;border:1px solid transparent;border-radius:4px;color:#9aa79d;text-decoration:none;text-align:center}
+.hunting-workspace-tabs a span{font-size:.76rem;font-weight:900}
+.hunting-workspace-tabs a small{color:#76867b;font-size:.6rem}
+.hunting-workspace-tabs a.active{border-color:#376653;background:#183027;color:#efe6d2;box-shadow:inset 0 -2px #51ad8c}
+.hunting-workspace-tabs a.active small{color:#9fcdb5}
+.hunting-workspace-tabs a:focus-visible,.hunting-workspace button:focus-visible,.hunting-workspace a:focus-visible{outline:2px solid #80c7a7;outline-offset:2px}
+.hunting-workspace-panel{min-width:0}
+.sourcing-view-actions{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 13px;padding:12px 14px;border:1px solid #29382f;background:#111613}
+.sourcing-view-actions p{margin:0;color:#9aa79d;font-size:.7rem;line-height:1.4}
+.sourcing-view-actions .seller-primary{flex:0 0 auto}
+.sourcing-card{min-width:0;border-radius:6px}
+.sourcing-card-head{min-width:0}
+.sourcing-card-title{min-width:0;display:grid;gap:3px}
+.sourcing-card-title h2{min-width:0;overflow-wrap:anywhere;line-height:1.08}
+.sourcing-card-title p{overflow-wrap:anywhere}
+.sourcing-card-badges{display:grid;justify-items:end;gap:7px;flex:0 0 auto}
+.sourcing-status{display:inline-flex;align-items:center;justify-content:center;min-height:29px;padding:5px 9px;border:1px solid #34483a;border-radius:999px;background:#18251c;color:#bfd0c1;font-size:.62rem;font-weight:900;white-space:nowrap}
+.sourcing-status.bought{border-color:#3c7250;background:#193422;color:#9ad5a7}
+.sourcing-status.skipped{border-color:#654039;background:#2b1b17;color:#dba092}
+.sourcing-card-meta{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) minmax(145px,.8fr);gap:10px;align-items:center}
+.sourcing-card-meta>span{min-width:0;display:grid;gap:4px}
+.sourcing-card-meta>span strong{overflow-wrap:anywhere;line-height:1.35}
+.sourcing-status-control{min-width:0;display:block}
+.sourcing-status-control select{width:100%;min-height:44px;padding:7px 9px;border:1px solid #3a4a40;border-radius:4px;background:#0b0f0c;color:#cad2ca;font-size:.68rem}
+.sourcing-status-control select:disabled{opacity:.72}
+.sourcing-card-notes{min-width:0;margin-top:10px;padding-top:9px;border-top:1px solid #26332b;color:#c2cec3}
+.sourcing-card-notes summary{min-height:36px;display:flex;align-items:center;color:#9ecbad;font-size:.66rem;font-weight:800;cursor:pointer}
+.sourcing-card-notes p{display:-webkit-box;min-width:0;margin:2px 0 0;overflow:hidden;color:#aeb9ad;font-size:.68rem;line-height:1.5;overflow-wrap:anywhere;word-break:break-word;-webkit-box-orient:vertical;-webkit-line-clamp:4}
+.sourcing-card-notes[open] p{display:block;overflow:visible}
+.sourcing-converted{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;padding:10px;border:1px solid #326146;background:#15281b;color:#a9d8b3;font-size:.7rem;font-weight:800}
+.sourcing-converted .seller-secondary{min-height:44px}
+.move-inventory{align-items:end}
+.move-inventory label{flex:1;min-width:0;display:grid;gap:5px;color:#aab8ad;font-size:.65rem;font-weight:800}
+.move-inventory input{min-height:44px}
+.move-inventory .seller-primary{min-height:44px}
+.move-inventory .seller-primary:disabled{opacity:.6;cursor:wait}
+.sourcing-empty .seller-primary{margin-top:7px;min-height:46px}
+@media(max-width:700px){
+  .hunting-workspace{width:100%}
+  .hunting-workspace-heading{margin-bottom:12px}
+  .hunting-workspace-heading h1{font-size:2.55rem}
+  .hunting-workspace-heading p{max-width:34ch;font-size:.73rem}
+  .hunting-workspace-tabs{position:sticky;top:calc(54px + max(10px,env(safe-area-inset-top)));gap:5px;margin:0 -2px 12px;padding:4px;background:rgba(15,21,17,.97);backdrop-filter:blur(12px)}
+  .hunting-workspace-tabs a{min-height:52px;display:grid;align-content:center;gap:3px;padding:5px 7px}
+  .hunting-workspace-tabs a span{font-size:.72rem;line-height:1.15;overflow-wrap:anywhere}
+  .hunting-workspace-tabs a small{font-size:.56rem;line-height:1.15}
+  .sourcing-view-actions{align-items:stretch;flex-direction:column;padding:11px}
+  .sourcing-view-actions .seller-primary{width:100%;min-height:48px}
+  .sourcing-card{padding:13px}
+  .sourcing-card-head{grid-template-columns:minmax(0,1fr);gap:10px}
+  .sourcing-card-badges{display:flex;align-items:center;justify-content:space-between}
+  .sourcing-card-meta{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .sourcing-card-meta>span{min-height:48px;padding:8px;border:1px solid #243229;background:#0e140f}
+  .sourcing-status-control{grid-column:1/-1}
+  .sourcing-status-control select{min-height:48px;font-size:.74rem}
+  .sourcing-converted{align-items:stretch;flex-direction:column}
+  .move-inventory{display:grid}
+  .move-inventory input,.move-inventory .seller-primary{width:100%;min-height:48px}
+}
 /* Phase 1.1 UAT: keep listing copy secondary and inside its card. */
 .listing-table{min-width:0}
 .wide-row{grid-template-columns:68px minmax(0,1fr) minmax(112px,max-content);align-items:center;gap:12px;min-width:0;padding:15px 0}
@@ -266,3 +332,4 @@
   .listing-edit-modal{position:relative;max-height:calc(94vh - env(safe-area-inset-top));max-height:calc(94dvh - env(safe-area-inset-top));padding-bottom:calc(14px + env(safe-area-inset-bottom));scroll-padding-block:16px calc(28px + env(safe-area-inset-bottom));overscroll-behavior:contain}
   .listing-edit-modal .seller-form-actions{position:static;z-index:auto;bottom:auto;margin:0;padding:8px 0 max(2px,env(safe-area-inset-bottom));background:none}
 }
+

@@ -88,7 +88,7 @@ export const ITEM_ANALYSIS_SUGGESTIONS = [
 
 export const SELLER_WORKSPACE_GROUPS = [
   { label: 'OPERASIONAL', links: [['/seller', 'Beranda', '⌂'], ['/seller/inventory', 'Barang', '▣']] },
-  { label: 'HUNTING', links: [['/seller/ai-hunter', 'Riset', '✦'], ['/seller/sourcing', 'Temuan tersimpan', '◌']] },
+  { label: 'HUNTING', links: [['/seller/ai-hunter', 'Hunting', '✦']] },
   { label: 'JUALAN', links: [['/seller/listings', 'Listing', '↗'], ['/seller/sales', 'Terjual', '◎']] },
 ]
 
@@ -106,9 +106,18 @@ export const SELLER_MOBILE_PRIMARY_LINKS = [
 ]
 
 export const SELLER_MOBILE_MORE_GROUPS = [
-  { label: 'HUNTING', links: [['/seller/sourcing', 'Temuan tersimpan', '◌']] },
   { label: 'JUALAN', links: [['/seller/sales', 'Terjual', '◎']] },
 ]
+
+export const SOURCING_CANDIDATE_STATUSES = ['WATCHING', 'CHECK', 'NEGOTIATING', 'BOUGHT', 'SKIPPED']
+
+const SOURCING_STATUS_LABELS = {
+  WATCHING: 'Dipantau',
+  CHECK: 'Perlu dicek',
+  NEGOTIATING: 'Negosiasi',
+  BOUGHT: 'Dibeli',
+  SKIPPED: 'Dilewati',
+}
 
 export const SELLER_WORKSPACE_LINKS = SELLER_WORKSPACE_GROUPS.flatMap(({ links }) => links)
 export const ADMIN_WORKSPACE_LINKS = ADMIN_WORKSPACE_GROUPS.slice(SELLER_WORKSPACE_GROUPS.length).flatMap(({ links }) => links)
@@ -131,6 +140,26 @@ export function workspacePathIsActive(path, href) {
   if (href === '/seller/ai-hunter') return path === href || path === '/seller/sourcing'
   if (href === '/seller/listings') return path === href || path === '/seller/sales'
   return path === href || path.startsWith(`${href}/`)
+}
+
+export function huntingTabForPath(path) {
+  return path === '/seller/sourcing' ? 'finds' : 'research'
+}
+
+export function huntingPathForTab(tab) {
+  return tab === 'finds' ? '/seller/sourcing' : '/seller/ai-hunter'
+}
+
+export function sourcingCandidateStatusLabel(status) {
+  return SOURCING_STATUS_LABELS[String(status || '').toUpperCase()] || titleCaseStatus(status)
+}
+
+export function sourcingCandidateCanMoveToInventory(candidate) {
+  return String(candidate?.status || '').toUpperCase() === 'BOUGHT' && !candidate?.product_id
+}
+
+export function sourcingCandidateIsInInventory(candidate) {
+  return Boolean(candidate?.product_id)
 }
 
 export function workspaceLinksForRole(role) {

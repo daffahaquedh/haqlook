@@ -30,3 +30,16 @@
 @media(max-width:700px){.hunter-action-status{gap:8px;padding:9px;font-size:.66rem}.hunter-action-status strong{font-size:.69rem}.hunter-action-status small{font-size:.61rem}.hunter-refresh-area.pending{grid-column:1/-1}.hunter-refresh-confirm{gap:7px;padding:9px}.hunter-refresh-confirm button{min-height:48px;padding:7px 6px;font-size:.62rem}.hunter-refresh-area>.hunter-refresh-button{min-height:48px;padding:7px 8px;font-size:.62rem}.hunter-preflight-start{min-height:48px;padding-inline:8px;font-size:.66rem}.hunter-composer .hunter-send{min-width:72px;padding-inline:4px;font-size:.62rem}}
 @media(prefers-reduced-motion:reduce){.hunter-loading-spinner{animation:none;border-color:#9bd3ad;border-right-color:transparent}}
 
+/* Phase 3 Hunting workspace embedding and saved-find handoff. */
+.hunter-page.embedded{width:100%;margin:0}
+.hunter-page-head.embedded{justify-content:flex-end;margin:0 0 11px}
+.hunter-target-actions .hunter-saved-state{min-height:42px;display:flex;flex:1 1 130px;align-items:center;justify-content:center;padding:0 9px;border:1px solid #376447;border-radius:5px;background:#15291b;color:#a4d9ae;font-size:.65rem;font-weight:900;text-align:center}
+.hunter-target-actions button.hunter-view-saved-button{border-color:#386a52;background:#182a20;color:#b9ddc2}
+@media(max-width:700px){
+  .hunter-page.embedded{width:100%}
+  .hunter-page-head.embedded{margin:0 0 8px}
+  .hunter-page-head.embedded .hunter-session-actions{justify-content:flex-end}
+  .hunter-target-actions .hunter-saved-state{min-height:44px}
+}
+
+

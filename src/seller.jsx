@@ -7,6 +7,8 @@ import {
   budgetLabel,
   budgetTone,
   calculateProfit,
+  huntingPathForTab,
+  huntingTabForPath,
   analysisSuggestionValue,
   analysisBilingualValue,
   applyItemAnalysisSuggestions,
@@ -24,6 +26,10 @@ import {
   productDetailPrimaryAction,
   productDetailTabForKey,
   safeHttpUrl,
+  SOURCING_CANDIDATE_STATUSES,
+  sourcingCandidateCanMoveToInventory,
+  sourcingCandidateIsInInventory,
+  sourcingCandidateStatusLabel,
   titleCaseStatus,
   workspaceMobileMoreGroupsForRole,
   workspaceNavigationGroupsForRole,
@@ -140,8 +146,7 @@ function SellerWorkspace({ path, profile, onLogout }) {
   else if (section === 'inventory' && id && subSection === 'edit') page = <EditInventory id={id} />
   else if (section === 'inventory' && id) page = <InventoryDetail id={id} />
   else if (section === 'inventory') page = <InventoryPage />
-  else if (section === 'ai-hunter') page = <HunterChatPage />
-  else if (section === 'sourcing') page = <SourcingPage />
+  else if (section === 'ai-hunter' || section === 'sourcing') page = <HuntingWorkspace path={workspacePath} />
   else if (section === 'hunter-analytics' && profile.role === 'ADMIN') page = <HunterAnalyticsPage />
   else if (section === 'listings') page = <ListingsPage />
   else if (section === 'sales') page = <SalesPage />
@@ -153,6 +158,32 @@ function SellerWorkspace({ path, profile, onLogout }) {
   }
   if (path === '/admin' && profile.role !== 'ADMIN') page = <AccessDenied />
   return <main className="seller-app"><SellerSidebar path={workspacePath} profile={profile} onLogout={onLogout} /><section className="seller-content">{page}</section><SellerMobileNav path={workspacePath} profile={profile} onLogout={onLogout} /></main>
+}
+
+function HuntingWorkspace({ path }) {
+  const activeTab = huntingTabForPath(path)
+  const [visitedTabs, setVisitedTabs] = useState(() => new Set([activeTab]))
+
+  useEffect(() => {
+    setVisitedTabs((current) => current.has(activeTab) ? current : new Set([...current, activeTab]))
+  }, [activeTab])
+
+  function selectTab(event, tab) {
+    event.preventDefault()
+    go(huntingPathForTab(tab))
+  }
+
+  return <div className="hunting-workspace">
+    <header className="hunting-workspace-heading">
+      <div><span className="seller-kicker">SELLER WORKSPACE / HUNTING</span><h1>Hunting</h1><p>Cari peluang barang dan kelola temuan yang sudah disimpan.</p></div>
+    </header>
+    <nav className="hunting-workspace-tabs" aria-label="Hunting">
+      <a href="/seller/ai-hunter" aria-current={activeTab === 'research' ? 'page' : undefined} className={activeTab === 'research' ? 'active' : ''} onClick={(event) => selectTab(event, 'research')}><span>Riset</span><small>Cari target barang</small></a>
+      <a href="/seller/sourcing" aria-current={activeTab === 'finds' ? 'page' : undefined} className={activeTab === 'finds' ? 'active' : ''} onClick={(event) => selectTab(event, 'finds')}><span>Temuan tersimpan</span><small>Pantau sebelum dibeli</small></a>
+    </nav>
+    {visitedTabs.has('research') && <section className="hunting-workspace-panel" aria-label="Riset" hidden={activeTab !== 'research'}><HunterChatPage embedded onOpenFinds={() => go('/seller/sourcing')} /></section>}
+    {visitedTabs.has('finds') && <section className="hunting-workspace-panel" aria-label="Temuan tersimpan" hidden={activeTab !== 'finds'}><SourcingPage embedded onOpenProduct={(productId) => go(`/seller/inventory/${productId}`)} onOpenResearch={() => go('/seller/ai-hunter')} /></section>}
+  </div>
 }
 
 function SellerSidebar({ path, profile, onLogout }) {
@@ -558,16 +589,134 @@ function EditInventory({ id }) {
 
 function ListingRow({ listing, label, onEdit }) { return <div className="listing-row"><div><strong>{label}</strong><span>{listing.listing_url ? 'URL saved' : 'No listing URL'}</span></div><div><b className={`listing-status ${listing.listing_status.toLowerCase()}`}>{titleCaseStatus(listing.listing_status)}</b><small>{listing.listed_price ? moneyIdr(listing.listed_price) : '—'}</small></div><button type="button" onClick={onEdit}>Edit</button></div> }
 
-function SourcingPage({ aiMode = false }) {
-  const [items, setItems] = useState([]); const [showForm, setShowForm] = useState(false); const [message, setMessage] = useState(''); const [purchasePrices, setPurchasePrices] = useState({})
+function SourcingPage({ embedded = false, onOpenProduct = () => {}, onOpenResearch = () => {} }) {
+  const [items, setItems] = useState([])
+  const [showForm, setShowForm] = useState(false)
+  const [message, setMessage] = useState('')
+  const [messageTone, setMessageTone] = useState('info')
+  const [loading, setLoading] = useState(true)
+  const [purchasePrices, setPurchasePrices] = useState({})
+  const [movingId, setMovingId] = useState('')
   const [form, setForm] = useState({ title: '', brand: '', category: '', source_platform: '', source_url: '', seller_asking_price: '', estimated_resale_min: '', estimated_resale_max: '', max_buy_price: '', condition: '', authenticity_risk: '', opportunity_score: '', notes: '', status: 'WATCHING' })
-  async function load() { if (!supabase) return; const { data, error } = await supabase.from('sourcing_candidates').select('*').order('created_at', { ascending: false }); if (error) setMessage(errorText(error)); else setItems(data || []) }
-  useEffect(() => { load() }, [])
-  async function addCandidate(event) { event.preventDefault(); if (form.source_url && !safeHttpUrl(form.source_url)) { setMessage('Source URL must use http:// or https://.'); return }; const payload = { ...form, source_url: form.source_url ? safeHttpUrl(form.source_url) : null, seller_asking_price: Number(form.seller_asking_price || 0), estimated_resale_min: Number(form.estimated_resale_min || 0), estimated_resale_max: Number(form.estimated_resale_max || 0), max_buy_price: Number(form.max_buy_price || 0), opportunity_score: form.opportunity_score === '' ? null : Number(form.opportunity_score) }; const { error } = await supabase.from('sourcing_candidates').insert(payload); if (error) setMessage(errorText(error)); else { setShowForm(false); setForm({ ...form, title: '', brand: '', source_url: '', notes: '' }); load() } }
-  async function updateStatus(candidate, status) { const now = new Date().toISOString(); const changes = { status }; if (status === 'CHECK' && !candidate.checked_at) changes.checked_at = now; if (status === 'BOUGHT' && !candidate.bought_at) changes.bought_at = now; const { error } = await supabase.from('sourcing_candidates').update(changes).eq('id', candidate.id); if (error) setMessage(errorText(error)); else load() }
-  async function moveToInventory(candidate) { const purchasePrice = Number(purchasePrices[candidate.id] || candidate.seller_asking_price || 0); if (!purchasePrice) { setMessage('Enter the final buy price before moving this candidate.'); return }; const { data, error } = await supabase.rpc('convert_sourcing_to_inventory', { p_candidate_id: candidate.id, p_purchase_price: purchasePrice }); if (error) setMessage(errorText(error, 'Could not create inventory item.')); else { setMessage('Candidate moved to master inventory.'); load(); if (data) go(`/seller/inventory/${data}`) } }
-  const visible = aiMode ? items.filter((item) => ['WATCHING', 'CHECK', 'NEGOTIATING'].includes(item.status)) : items
-  return <div><SellerHeader eyebrow={aiMode ? 'HUNTING / RISET' : 'HUNTING / TEMUAN TERSIMPAN'} title={aiMode ? 'Riset' : 'Temuan tersimpan'} copy={aiMode ? 'A review queue for potential finds. Scores stay blank until a real AI or manual assessment exists.' : 'Save candidates before they become inventory. No external marketplace automation is used.'} action={<button className="seller-primary compact" type="button" onClick={() => setShowForm((value) => !value)}>＋ Tambah temuan</button>} />{message && <Notice tone="warning">{message}</Notice>}{!AI_ENABLED && aiMode && <Notice tone="info">AI belum dikonfigurasi. This queue is manual-only; no synthetic score is generated.</Notice>}{showForm && <form className="seller-panel seller-form sourcing-form" onSubmit={addCandidate}><PanelTitle eyebrow="NEW CANDIDATE" title="Watch an opportunity" /><div className="seller-fields two"><Field label="Title" value={form.title} onChange={(value) => setForm({ ...form, title: value })} required placeholder="Vintage Stussy jacket" /><Field label="Brand" value={form.brand} onChange={(value) => setForm({ ...form, brand: value })} placeholder="Stussy" /><Field label="Category" value={form.category} onChange={(value) => setForm({ ...form, category: value })} placeholder="Jackets" /><Field label="Source platform" value={form.source_platform} onChange={(value) => setForm({ ...form, source_platform: value })} placeholder="Grailed / Instagram" /><Field label="Source URL" value={form.source_url} onChange={(value) => setForm({ ...form, source_url: value })} placeholder="https://…" /><Field label="Seller asking price" value={form.seller_asking_price} onChange={(value) => setForm({ ...form, seller_asking_price: value })} type="number" /><Field label="Estimated resale min" value={form.estimated_resale_min} onChange={(value) => setForm({ ...form, estimated_resale_min: value })} type="number" /><Field label="Estimated resale max" value={form.estimated_resale_max} onChange={(value) => setForm({ ...form, estimated_resale_max: value })} type="number" /><Field label="Max buy price" value={form.max_buy_price} onChange={(value) => setForm({ ...form, max_buy_price: value })} type="number" /><Field label="Opportunity score (manual)" value={form.opportunity_score} onChange={(value) => setForm({ ...form, opportunity_score: value })} type="number" placeholder="0–100 or leave blank" /><Field label="Authenticity risk" value={form.authenticity_risk} onChange={(value) => setForm({ ...form, authenticity_risk: value })} placeholder="Unknown / low / high" /><Field label="Notes" value={form.notes} onChange={(value) => setForm({ ...form, notes: value })} textarea placeholder="What needs checking?" /></div><div className="seller-form-actions"><button className="seller-primary">Save candidate</button><button type="button" className="seller-secondary" onClick={() => setShowForm(false)}>Cancel</button></div></form>}<section className="sourcing-list">{visible.map((candidate) => <article className="sourcing-card" key={candidate.id}><div className="sourcing-card-head"><div><span className="sku">{candidate.source_platform || 'SOURCE UNKNOWN'}</span><h2>{candidate.title}</h2><p>{candidate.brand || 'Brand not set'} · asking {moneyIdr(candidate.seller_asking_price)}</p></div><b className={`opportunity ${candidate.opportunity_score >= 70 ? 'high' : candidate.opportunity_score >= 40 ? 'check' : candidate.opportunity_score == null ? 'empty' : 'skip'}`}>{candidate.opportunity_score == null ? 'NO SCORE' : candidate.opportunity_score >= 70 ? '🔥 HIGH POTENTIAL' : candidate.opportunity_score >= 40 ? '🟡 CHECK' : '🔴 SKIP'}</b></div><div className="sourcing-card-meta"><span>Max buy <strong>{moneyIdr(candidate.max_buy_price)}</strong></span><span>Resale <strong>{moneyIdr(candidate.estimated_resale_min)}–{moneyIdr(candidate.estimated_resale_max)}</strong></span><select value={candidate.status} onChange={(event) => updateStatus(candidate, event.target.value)}>{['WATCHING', 'CHECK', 'NEGOTIATING', 'BOUGHT', 'SKIPPED'].map((status) => <option key={status}>{status}</option>)}</select></div>{candidate.status === 'BOUGHT' && <div className="move-inventory"><input type="number" value={purchasePrices[candidate.id] || candidate.seller_asking_price || ''} onChange={(event) => setPurchasePrices({ ...purchasePrices, [candidate.id]: event.target.value })} placeholder="Final buy price" /><button type="button" className="seller-primary compact" onClick={() => moveToInventory(candidate)}>Move to inventory →</button></div>}</article>)}{!visible.length && <div className="seller-empty"><strong>NO CANDIDATES YET</strong><p>Use Add candidate to start the watchlist.</p></div>}</section></div>
+
+  async function load() {
+    if (!supabase) { setLoading(false); return }
+    const { data, error } = await supabase.from('sourcing_candidates').select('*').order('created_at', { ascending: false })
+    if (error) { setMessage(errorText(error)); setMessageTone('error') }
+    else setItems(data || [])
+    setLoading(false)
+  }
+
+  useEffect(() => { void load() }, [])
+
+  async function addCandidate(event) {
+    event.preventDefault()
+    if (form.source_url && !safeHttpUrl(form.source_url)) {
+      setMessage('Tautan sumber harus menggunakan http:// atau https://.')
+      setMessageTone('error')
+      return
+    }
+    const payload = {
+      ...form,
+      source_url: form.source_url ? safeHttpUrl(form.source_url) : null,
+      seller_asking_price: Number(form.seller_asking_price || 0),
+      estimated_resale_min: Number(form.estimated_resale_min || 0),
+      estimated_resale_max: Number(form.estimated_resale_max || 0),
+      max_buy_price: Number(form.max_buy_price || 0),
+      opportunity_score: form.opportunity_score === '' ? null : Number(form.opportunity_score),
+    }
+    const { error } = await supabase.from('sourcing_candidates').insert(payload)
+    if (error) { setMessage(errorText(error)); setMessageTone('error') }
+    else {
+      setShowForm(false)
+      setForm({ ...form, title: '', brand: '', source_url: '', notes: '' })
+      setMessage('Temuan berhasil disimpan.')
+      setMessageTone('success')
+      await load()
+    }
+  }
+
+  async function updateStatus(candidate, status) {
+    const now = new Date().toISOString()
+    const changes = { status }
+    if (status === 'CHECK' && !candidate.checked_at) changes.checked_at = now
+    if (status === 'BOUGHT' && !candidate.bought_at) changes.bought_at = now
+    const { error } = await supabase.from('sourcing_candidates').update(changes).eq('id', candidate.id)
+    if (error) { setMessage(errorText(error)); setMessageTone('error') }
+    else { setMessage('Status temuan diperbarui.'); setMessageTone('success'); await load() }
+  }
+
+  async function moveToInventory(candidate) {
+    if (!sourcingCandidateCanMoveToInventory(candidate) || movingId) return
+    const purchasePrice = Number(purchasePrices[candidate.id] || candidate.seller_asking_price || 0)
+    if (!purchasePrice) {
+      setMessage('Masukkan harga beli final sebelum memasukkan barang ke inventory.')
+      setMessageTone('error')
+      return
+    }
+    setMovingId(candidate.id)
+    const { data, error } = await supabase.rpc('convert_sourcing_to_inventory', { p_candidate_id: candidate.id, p_purchase_price: purchasePrice })
+    if (error) { setMessage(errorText(error, 'Barang belum bisa dipindahkan ke inventory.')); setMessageTone('error') }
+    else if (!data) { setMessage('Konversi tidak mengembalikan detail barang. Temuan tetap tersimpan; periksa status sebelum mencoba lagi.'); setMessageTone('error') }
+    else {
+      setItems((current) => current.map((item) => item.id === candidate.id ? { ...item, status: 'BOUGHT', product_id: data } : item))
+      setMessage('Barang sudah masuk ke Inventory. Buka barang dari kartu temuan ini.')
+      setMessageTone('success')
+      await load()
+    }
+    setMovingId('')
+  }
+
+  return <div className="sourcing-workspace-view">
+    {!embedded && <SellerHeader eyebrow="HUNTING / TEMUAN TERSIMPAN" title="Temuan tersimpan" copy="Pantau target dari Riset atau catat temuan manual sebelum dibeli." action={<button className="seller-primary compact" type="button" onClick={() => setShowForm((value) => !value)}>＋ Simpan temuan</button>} />}
+    {embedded && <div className="sourcing-view-actions"><p>Target tersimpan dari Riset dan catatan hunting manual.</p><button className="seller-primary compact" type="button" onClick={() => setShowForm((value) => !value)} aria-expanded={showForm}>＋ Simpan temuan</button></div>}
+    {message && <Notice tone={messageTone}>{message}</Notice>}
+    {showForm && <form className="seller-panel seller-form sourcing-form" onSubmit={addCandidate}>
+      <PanelTitle eyebrow="CATAT TEMUAN" title="Simpan target untuk dipantau" />
+      <div className="seller-fields two">
+        <Field label="Nama target / barang" value={form.title} onChange={(value) => setForm({ ...form, title: value })} required placeholder="Vintage Stussy jacket" />
+        <Field label="Merek" value={form.brand} onChange={(value) => setForm({ ...form, brand: value })} placeholder="Stussy" />
+        <Field label="Kategori" value={form.category} onChange={(value) => setForm({ ...form, category: value })} placeholder="Jaket" />
+        <Field label="Asal / platform" value={form.source_platform} onChange={(value) => setForm({ ...form, source_platform: value })} placeholder="Pajak Melati / Grailed" />
+        <Field label="Tautan sumber" value={form.source_url} onChange={(value) => setForm({ ...form, source_url: value })} placeholder="https://…" />
+        <Field label="Harga yang diminta" value={form.seller_asking_price} onChange={(value) => setForm({ ...form, seller_asking_price: value })} type="number" />
+        <Field label="Estimasi jual minimum" value={form.estimated_resale_min} onChange={(value) => setForm({ ...form, estimated_resale_min: value })} type="number" />
+        <Field label="Estimasi jual maksimum" value={form.estimated_resale_max} onChange={(value) => setForm({ ...form, estimated_resale_max: value })} type="number" />
+        <Field label="Batas maksimal modal" value={form.max_buy_price} onChange={(value) => setForm({ ...form, max_buy_price: value })} type="number" />
+        <Field label="Skor peluang (manual, opsional)" value={form.opportunity_score} onChange={(value) => setForm({ ...form, opportunity_score: value })} type="number" placeholder="0–100 atau kosongkan" />
+        <Field label="Risiko keaslian" value={form.authenticity_risk} onChange={(value) => setForm({ ...form, authenticity_risk: value })} placeholder="Belum diketahui / rendah / tinggi" />
+        <Field label="Catatan inspeksi" value={form.notes} onChange={(value) => setForm({ ...form, notes: value })} textarea placeholder="Bagian yang perlu diperiksa…" />
+      </div>
+      <div className="seller-form-actions"><button className="seller-primary">Simpan temuan</button><button type="button" className="seller-secondary" onClick={() => setShowForm(false)}>Batal</button></div>
+    </form>}
+    <section className="sourcing-list" aria-label="Daftar temuan tersimpan" aria-busy={loading}>
+      {loading && <div className="seller-empty" role="status"><span className="seller-spinner" /><p>Memuat temuan tersimpan…</p></div>}
+      {!loading && items.map((candidate) => {
+        const converted = sourcingCandidateIsInInventory(candidate)
+        const canMove = sourcingCandidateCanMoveToInventory(candidate)
+        const hasAskingPrice = Number(candidate.seller_asking_price) > 0
+        const hasMaxBuy = Number(candidate.max_buy_price) > 0
+        const hasResaleRange = Number(candidate.estimated_resale_min) > 0 && Number(candidate.estimated_resale_max) > 0
+        const score = Number(candidate.opportunity_score)
+        return <article className="sourcing-card" key={candidate.id}>
+          <div className="sourcing-card-head">
+            <div className="sourcing-card-title"><span className="sku">{candidate.source_platform || 'Asal belum dicatat'}</span><h2>{candidate.title || 'Temuan tanpa nama'}</h2><p>{[candidate.category, candidate.brand].filter(Boolean).join(' · ') || 'Kategori dan merek belum dicatat'}</p></div>
+            <div className="sourcing-card-badges"><b className={`sourcing-status ${String(candidate.status).toLowerCase()}`}>{sourcingCandidateStatusLabel(candidate.status)}</b><span className={`opportunity ${score >= 70 ? 'high' : score >= 40 ? 'check' : score > 0 ? 'skip' : 'empty'}`}>{score > 0 ? `Peluang ${score}` : 'Belum dinilai'}</span></div>
+          </div>
+          <div className="sourcing-card-meta">
+            <span>Harga diminta<strong>{hasAskingPrice ? moneyIdr(candidate.seller_asking_price) : 'Belum dicatat'}</strong></span>
+            <span>Batas modal<strong>{hasMaxBuy ? moneyIdr(candidate.max_buy_price) : 'Belum ditetapkan'}</strong></span>
+            <span>Estimasi jual<strong>{hasResaleRange ? `${moneyIdr(candidate.estimated_resale_min)}–${moneyIdr(candidate.estimated_resale_max)}` : 'Belum ada data'}</strong></span>
+            <label className="sourcing-status-control"><span className="sr-only">Status temuan {candidate.title}</span><select aria-label={`Status temuan ${candidate.title}`} value={candidate.status} disabled={converted || Boolean(movingId)} onChange={(event) => void updateStatus(candidate, event.target.value)}>{SOURCING_CANDIDATE_STATUSES.map((status) => <option key={status} value={status}>{sourcingCandidateStatusLabel(status)}</option>)}</select></label>
+          </div>
+          {candidate.notes && <details className="sourcing-card-notes"><summary>Alasan & catatan inspeksi</summary><p>{candidate.notes}</p></details>}
+          {converted && <div className="sourcing-converted" role="status"><span>✓ Barang sudah masuk ke Inventory</span><button type="button" className="seller-secondary compact" onClick={() => onOpenProduct(candidate.product_id)}>Buka barang →</button></div>}
+          {canMove && <div className="move-inventory"><label><span>Harga beli final</span><input type="number" min="1" inputMode="numeric" value={purchasePrices[candidate.id] || candidate.seller_asking_price || ''} onChange={(event) => setPurchasePrices({ ...purchasePrices, [candidate.id]: event.target.value })} placeholder="Masukkan modal akhir" /></label><button type="button" className="seller-primary compact" disabled={Boolean(movingId)} aria-busy={movingId === candidate.id} onClick={() => void moveToInventory(candidate)}>{movingId === candidate.id ? 'Memasukkan…' : 'Masukkan ke Barang →'}</button></div>}
+        </article>
+      })}
+      {!loading && !items.length && <div className="seller-empty sourcing-empty"><strong>Belum ada temuan tersimpan.</strong><p>Simpan target dari Riset untuk memantaunya di sini.</p><button type="button" className="seller-primary compact" onClick={onOpenResearch}>Mulai Riset →</button></div>}
+    </section>
+  </div>
 }
 
 function ListingsPage() {
