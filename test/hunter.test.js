@@ -4,6 +4,7 @@ import { buildHunterCacheKey, detectHunterCategories, detectHunterDestination, f
 import { routeHunterInteraction } from '../src/hunter-router.js'
 import { buildHunterChatContext, createHunterBriefRequest, createHunterChatRequest, createHunterItemCheckRequest, HUNTER_OPENAI_TIMEOUT_MS, isHunterReasoningQuestion } from '../supabase/functions/seller-ai/hunter-analysis.ts'
 import { countWebSearchCalls, extractHunterCitations, hunterResearchDecision, hunterResponseMetrics, parseCompletedHunterJson, sanitizeHunterBrief, shouldReadHunterCache, summarizeHaqlooksData } from '../supabase/functions/seller-ai/hunter-utils.ts'
+import { advanceHunterActivity, beginHunterActivity, finishHunterActivity, hunterActivityLabel, isHunterActivityActive } from '../src/hunter-loading.js'
 import { estimateHunterCostIdr, hunterReservationCostIdr } from '../supabase/functions/seller-ai/pricing.ts'
 
 test('natural budget parsing handles localized IDR and shorthand', () => {
@@ -312,6 +313,52 @@ test('photo checker still routes through ITEM_CHECK and keeps its no-search low 
   const request = createHunterItemCheckRequest({ imageDataUrls: ['data:image/jpeg;base64,AA=='], askingPriceIdr: 100000 })
   assert.deepEqual(request.reasoning, { effort: 'low' })
   assert.equal(request.tools, undefined)
+})
+
+test('refresh activity becomes visibly busy immediately and ignores duplicate submissions', () => {
+  const idle = finishHunterActivity()
+  const active = beginHunterActivity(idle, 'REFRESH_RESEARCH')
+  assert.equal(isHunterActivityActive(active, 'REFRESH_RESEARCH'), true)
+  assert.equal(hunterActivityLabel(active), 'Menyiapkan refresh riset…')
+  assert.strictEqual(beginHunterActivity(active, 'REFRESH_RESEARCH'), active)
+  assert.equal(hunterActivityLabel(advanceHunterActivity(active)), 'Mencari referensi pasar terbaru…')
+  assert.equal(/\d+%/.test(hunterActivityLabel(active)), false)
+})
+
+test('successful and failed refresh outcomes both clear the busy state', () => {
+  const active = beginHunterActivity(finishHunterActivity(), 'REFRESH_RESEARCH')
+  assert.equal(isHunterActivityActive(finishHunterActivity(active), 'REFRESH_RESEARCH'), false)
+  // Failure follows the same finally cleanup path as success; the error is kept separately by the UI.
+  const failedActivity = finishHunterActivity(active)
+  assert.equal(failedActivity.action, null)
+  assert.equal(hunterActivityLabel(failedActivity), '')
+})
+
+test('destination research, chat and item check expose their own activity copy', () => {
+  const research = beginHunterActivity(finishHunterActivity(), 'START_RESEARCH')
+  assert.equal(hunterActivityLabel(research), 'Memeriksa cache riset…')
+  const chat = beginHunterActivity(finishHunterActivity(), 'AI_CHAT')
+  assert.equal(hunterActivityLabel(chat), 'Memeriksa konteks brief tersimpan…')
+  const item = beginHunterActivity(finishHunterActivity(), 'ITEM_CHECK')
+  assert.equal(hunterActivityLabel(item), 'Menyiapkan foto untuk dianalisis…')
+  assert.equal(hunterActivityLabel(advanceHunterActivity(item)), 'Menganalisis foto barang…')
+})
+
+test('local preflight and filter actions never create paid-AI loading activity', () => {
+  const idle = finishHunterActivity()
+  for (const action of ['PREFLIGHT_RESPONSE', 'PREFLIGHT_CLARIFY', 'LOCAL_FILTER', 'LOCAL_SORT']) {
+    const next = beginHunterActivity(idle, action)
+    assert.equal(next.action, null, action)
+    assert.equal(hunterActivityLabel(next), '', action)
+  }
+  const destination = routeHunterInteraction({ action: 'destination', value: 'Pajak Melati', state: preflightState })
+  const budget = routeHunterInteraction({ action: 'budget', value: 300000, state: destination.state })
+  const category = routeHunterInteraction({ action: 'category', value: ['Jackets'], state: budget.state })
+  const market = routeHunterInteraction({ action: 'market', value: 'international', state: category.state })
+  for (const step of [destination, budget, category, market]) {
+    assert.ok(['PREFLIGHT_RESPONSE', 'LOCAL_FILTER'].includes(step.type))
+    assert.equal(beginHunterActivity(idle, step.type).action, null)
+  }
 })
 
 

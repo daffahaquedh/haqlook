@@ -3,6 +3,7 @@ import { AI_ENABLED, supabase } from './supabase-client'
 import { prepareProductPhoto } from './seller-photos'
 import { filterHunterTargets, HUNTER_DESTINATIONS, sortHunterTargets } from './hunter-utils'
 import { routeHunterInteraction } from './hunter-router'
+import { advanceHunterActivity, beginHunterActivity, finishHunterActivity, hunterActivityLabel, isHunterActivityActive } from './hunter-loading'
 import { moneyIdr } from './seller-utils'
 import './hunter.css'
 
@@ -21,6 +22,17 @@ function errorMessage(error, fallback = 'Belum berhasil. Coba lagi sebentar.') {
   if (/AI_INVALID_RESPONSE/i.test(signal)) return 'Jawaban AI belum terbaca dengan benar. Coba ulangi tanpa mengubah data inventory.'
   if (/IMAGE_UNAVAILABLE/i.test(signal)) return 'Foto tidak bisa dianalisis. Pilih JPEG, PNG, atau WebP lain.'
   return raw || fallback
+}
+
+function HunterSpinner() {
+  return <span className="hunter-loading-spinner" aria-hidden="true" />
+}
+
+function HunterActivityStatus({ label, detail, compact = false }) {
+  return <div className={`hunter-action-status${compact ? ' compact' : ''}`} role="status" aria-live="polite" aria-atomic="true" aria-busy="true">
+    <HunterSpinner />
+    <span><strong>{label}</strong>{detail && <small>{detail}</small>}</span>
+  </div>
 }
 
 async function callHunterFunction(body) {
@@ -106,7 +118,9 @@ export function HunterChatPage() {
   const [isHere, setIsHere] = useState(false)
   const [question, setQuestion] = useState('')
   const [loading, setLoading] = useState(false)
-  const [loadingLabel, setLoadingLabel] = useState('')
+  const [activity, setActivity] = useState(() => finishHunterActivity())
+  const [actionError, setActionError] = useState(null)
+  const [actionNotice, setActionNotice] = useState(null)
   const [error, setError] = useState('')
   const [sourceCandidates, setSourceCandidates] = useState({})
   const [notSeen, setNotSeen] = useState({})
@@ -120,9 +134,16 @@ export function HunterChatPage() {
   const [checkError, setCheckError] = useState('')
   const chatEnd = useRef(null)
   const requestInFlight = useRef(false)
+  const actionNoticeTimer = useRef(null)
 
   useEffect(() => { void initialize() }, [])
   useEffect(() => { chatEnd.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }) }, [messages.length, loading])
+  useEffect(() => {
+    if (!activity.action) return undefined
+    const timer = window.setInterval(() => setActivity((current) => advanceHunterActivity(current)), 3600)
+    return () => window.clearInterval(timer)
+  }, [activity.action])
+  useEffect(() => () => window.clearTimeout(actionNoticeTimer.current), [])
 
   async function initialize() {
     if (!supabase) { setError('Supabase tidak dikonfigurasi untuk environment ini.'); return }
@@ -206,6 +227,12 @@ export function HunterChatPage() {
     ])
   }
 
+  function showActionNotice(action, message) {
+    window.clearTimeout(actionNoticeTimer.current)
+    setActionNotice({ action, message })
+    actionNoticeTimer.current = window.setTimeout(() => setActionNotice(null), 4200)
+  }
+
   async function executeHunterDecision(decision, { message = '', itemBody = null } = {}) {
     if (!['LOAD_CACHE', 'START_RESEARCH', 'REFRESH_RESEARCH', 'AI_CHAT', 'ITEM_CHECK'].includes(decision?.type)) return null
     if (requestInFlight.current) return null
@@ -229,9 +256,12 @@ export function HunterChatPage() {
     const optimisticId = `pending-${Date.now()}`
     if (message && feature !== 'HUNTER_ITEM_CHECK') setMessages((current) => [...current, { id: optimisticId, role: 'user', content: message, message_kind: 'chat', created_at: new Date().toISOString() }])
     setError('')
+    setActionError(null)
+    setActionNotice(null)
+    window.clearTimeout(actionNoticeTimer.current)
     requestInFlight.current = true
     setLoading(true)
-    setLoadingLabel(feature === 'HUNTER_CHAT' ? 'Menyiapkan jawaban dari brief tersimpan…' : feature === 'HUNTER_REFRESH' ? 'Memperbarui referensi pasar…' : 'Memeriksa cache sebelum mencari…')
+    setActivity((current) => beginHunterActivity(current, decision.type))
     try {
       const data = await callHunterFunction(requestBody)
       if (data.session_id && data.session_id !== sessionId) setSessionId(data.session_id)
@@ -242,13 +272,20 @@ export function HunterChatPage() {
       if (Array.isArray(data.focused_target_ids)) setFocusedTargetIds(data.focused_target_ids)
       if (feature !== 'HUNTER_ITEM_CHECK') setMessages((current) => [...current, { id: `local-assistant-${Date.now()}`, role: 'assistant', content: data.assistant_message || data.reply || 'Selesai.', message_kind: data.brief ? 'brief' : 'chat', metadata: data.brief_id ? { brief_id: data.brief_id } : {}, created_at: new Date().toISOString() }])
       if (data.session_id) setSessions((current) => current.map((session) => session.id === data.session_id ? { ...session, updated_at: new Date().toISOString(), destination: data.destination || session.destination } : session))
+      if (data.brief && decision.type === 'REFRESH_RESEARCH') showActionNotice('REFRESH_RESEARCH', 'Riset diperbarui')
+      else if (data.brief && ['LOAD_CACHE', 'START_RESEARCH'].includes(decision.type)) showActionNotice(decision.type, data.cached ? 'Brief dari cache dimuat' : 'Hunting Brief siap')
       return data
     } catch (caught) {
       if (message && feature !== 'HUNTER_ITEM_CHECK') setMessages((current) => current.filter((item) => item.id !== optimisticId))
-      setError(errorMessage(caught, 'AI Hunter sedang tidak tersedia.'))
+      const friendlyError = errorMessage(caught, 'AI Hunter sedang tidak tersedia.')
+      if (feature === 'HUNTER_ITEM_CHECK') setError('')
+      else {
+        setActionError({ action: decision.type, message: friendlyError })
+        setError(friendlyError)
+      }
       throw caught
     } finally {
-      requestInFlight.current = false; setLoading(false); setLoadingLabel(''); void refreshAiBudget()
+      requestInFlight.current = false; setLoading(false); setActivity((current) => finishHunterActivity(current)); void refreshAiBudget()
     }
   }
 
@@ -259,6 +296,7 @@ export function HunterChatPage() {
     const decision = routeHunterInteraction({ text: trimmed, state: routerState(), hasBrief: hasCurrentBrief })
     if (decision.type === 'PREFLIGHT_RESPONSE' || decision.type === 'PREFLIGHT_CLARIFY' || decision.type === 'LOCAL_FILTER' || decision.type === 'LOCAL_SORT') {
       setError('')
+      setActionError(null)
       await applyRouterState(decision.state)
       if (decision.type === 'LOCAL_SORT') {
         const filtered = filterHunterTargets(brief?.brief, { categories: categoryFocus, budgetIdr, marketGoal, activeSection })
@@ -275,6 +313,7 @@ export function HunterChatPage() {
   async function choosePreflight(action, value, label) {
     const decision = routeHunterInteraction({ action, value, state: routerState() })
     setError('')
+    setActionError(null)
     await applyRouterState(decision.state)
     if (decision.type === 'LOCAL_FILTER') { setFocusedTargetIds([]); setSortMode('best') }
     appendLocalExchange(label, decision.reply)
@@ -297,6 +336,7 @@ export function HunterChatPage() {
   }
 
   const hasCurrentBrief = Boolean(brief && String(brief.destination || brief.brief?.destination_name || '').toLocaleLowerCase('id-ID') === String(destination).toLocaleLowerCase('id-ID'))
+  const loadingLabel = hunterActivityLabel(activity)
   const visibleTargets = useMemo(() => {
     const filtered = filterHunterTargets(brief?.brief, { categories: categoryFocus, budgetIdr, marketGoal, activeSection })
     return sortHunterTargets(filtered, sortMode).filter((target) => !focusedTargetIds.length || focusedTargetIds.includes(target.target_id))
@@ -355,11 +395,11 @@ export function HunterChatPage() {
     <header className="hunter-page-head"><div><span className="hunter-eyebrow">HAQLOOKS SOURCING COPILOT</span><h1>AI Hunter</h1><p>Asisten sourcing Haqlooks · Haqlooks sourcing assistant</p></div><div className="hunter-session-actions"><label className="sr-only" htmlFor="hunter-session">Pilih sesi Hunter</label><select id="hunter-session" value={sessionId} onChange={(event) => { const selected = sessions.find((item) => item.id === event.target.value); if (selected) void selectSession(selected) }}>{sessions.map((session) => <option key={session.id} value={session.id}>{session.destination || 'Percakapan baru'}</option>)}</select><button className="hunter-icon-button" type="button" onClick={() => void newSession()} aria-label="Mulai percakapan baru">＋</button></div></header>
     {!AI_ENABLED && <div className="hunter-disabled" role="status"><strong>AI belum diaktifkan di environment ini.</strong><span>Inventory dan candidate manual tetap tersedia. Backend Hunter akan aktif setelah flag AI pada deployment diizinkan.</span></div>}
     {Number(aiBudget?.percentage || 0) >= 90 && <div className="hunter-budget-warning" role="status"><strong>{Number(aiBudget?.percentage || 0) >= 100 ? 'AI monthly budget reached' : 'Budget AI hampir tercapai'}</strong><span>{moneyIdr(aiBudget?.used || 0)} dari {moneyIdr(aiBudget?.budget || 100000)} terpakai. Sourcing manual tetap tersedia.</span></div>}
-    {error && <div className="hunter-error" role="alert">{error}</div>}
-    <section className="hunter-chat" aria-label="Percakapan AI Hunter">
+    {error && !actionError && <div className="hunter-error" role="alert">{error}</div>}
+    <section className="hunter-chat" aria-label="Percakapan AI Hunter" aria-busy={loading}>
       <div className="hunter-bubble assistant"><small>HAQLOOKS HUNTER</small><p>{OPENING}</p><p className="hunter-translation">Where are you sourcing today?</p></div>
       {messages.map((message) => <article className={`hunter-bubble ${message.role === 'assistant' ? 'assistant' : 'seller'}`} key={message.id}><small>{message.role === 'assistant' ? 'HAQLOOKS HUNTER' : 'KAMU / YOU'}</small><p>{message.content}</p></article>)}
-      {loading && <div className="hunter-bubble assistant hunter-thinking" role="status"><span className="hunter-pulse" />{loadingLabel}</div>}
+      {loading && <div className="hunter-bubble assistant hunter-thinking" role="status" aria-live="polite"><HunterSpinner />{loadingLabel}</div>}
       <div ref={chatEnd} />
     </section>
     {preflightStep !== 'done' && <section className="hunter-preflight" aria-label="Rencana hunting">
@@ -368,16 +408,16 @@ export function HunterChatPage() {
       {preflightStep === 'budget' && <><p>Budget hunting hari ini berapa?</p><div className="hunter-preflight-options">{[['< Rp300k', 200000], ['Rp300–500k', 400000], ['Rp500k–1jt', 750000], ['> Rp1jt', 1500000], ['Bebas', null]].map(([label, value]) => <button type="button" key={label} disabled={loading} onClick={() => void choosePreflight('budget', value, label)}>{label}</button>)}</div></>}
       {preflightStep === 'category' && <><p>Mau fokus cari apa?</p><div className="hunter-preflight-options">{[['Semua', []], ['Kaos', ['T-shirts']], ['Jaket', ['Jackets']], ['Sepatu', ['Shoes']], ['Tas / Aksesoris', ['Bags', 'Accessories']]].map(([label, value]) => <button type="button" key={label} disabled={loading} onClick={() => void choosePreflight('category', value, label)}>{label}</button>)}</div></>}
       {preflightStep === 'market' && <><p>Target jualnya ke mana?</p><div className="hunter-preflight-options">{[['Lokal', 'local'], ['Internasional', 'international'], ['Keduanya', 'both']].map(([label, value]) => <button type="button" key={value} disabled={loading} onClick={() => void choosePreflight('market', value, label)}>{label}</button>)}</div></>}
-      {preflightStep === 'summary' && <><dl><div><dt>Lokasi</dt><dd>{destination || 'Belum dipilih'}</dd></div><div><dt>Budget</dt><dd>{budgetIdr ? moneyIdr(budgetIdr) : 'Bebas'}</dd></div><div><dt>Fokus</dt><dd>{categoryFocus.length ? categoryFocus.join(', ') : 'Semua kategori'}</dd></div><div><dt>Target pasar</dt><dd>{marketGoal === 'international' ? 'Internasional' : marketGoal === 'local' ? 'Lokal' : 'Keduanya'}</dd></div></dl><p className="hunter-preflight-cost">Research AI akan mencari data pasar terbaru. Stok fisik tidak dijamin; hasil adalah hipotesis sourcing. Research fresh akan dipakai dari cache 12 jam tanpa biaya baru.</p><div className="hunter-preflight-actions"><button type="button" className="hunter-preflight-edit" disabled={loading} onClick={() => { const decision = routeHunterInteraction({ action: 'edit', state: routerState() }); void applyRouterState(decision.state); appendLocalExchange('Ubah rencana', decision.reply) }}>Ubah</button><button type="button" className="hunter-preflight-start" disabled={!AI_ENABLED || loading || !destination} onClick={() => void confirmResearch()}>{loading ? 'Memeriksa…' : 'Mulai Research'}</button></div>{!AI_ENABLED && <small>AI belum diaktifkan untuk environment ini.</small>}</>}
+      {preflightStep === 'summary' && <><dl><div><dt>Lokasi</dt><dd>{destination || 'Belum dipilih'}</dd></div><div><dt>Budget</dt><dd>{budgetIdr ? moneyIdr(budgetIdr) : 'Bebas'}</dd></div><div><dt>Fokus</dt><dd>{categoryFocus.length ? categoryFocus.join(', ') : 'Semua kategori'}</dd></div><div><dt>Target pasar</dt><dd>{marketGoal === 'international' ? 'Internasional' : marketGoal === 'local' ? 'Lokal' : 'Keduanya'}</dd></div></dl><p className="hunter-preflight-cost">Research AI akan mencari data pasar terbaru. Stok fisik tidak dijamin; hasil adalah hipotesis sourcing. Research fresh akan dipakai dari cache 12 jam tanpa biaya baru.</p><div className="hunter-preflight-actions" aria-busy={isHunterActivityActive(activity, 'START_RESEARCH') || isHunterActivityActive(activity, 'LOAD_CACHE')}><button type="button" className="hunter-preflight-edit" disabled={loading} onClick={() => { const decision = routeHunterInteraction({ action: 'edit', state: routerState() }); void applyRouterState(decision.state); appendLocalExchange('Ubah rencana', decision.reply) }}>Ubah</button><button type="button" className="hunter-preflight-start" disabled={!AI_ENABLED || loading || !destination} aria-busy={isHunterActivityActive(activity, 'START_RESEARCH') || isHunterActivityActive(activity, 'LOAD_CACHE')} onClick={() => void confirmResearch()}>{isHunterActivityActive(activity, 'START_RESEARCH') || isHunterActivityActive(activity, 'LOAD_CACHE') ? <><HunterSpinner /> Memeriksa…</> : 'Mulai Research'}</button></div>{(isHunterActivityActive(activity, 'START_RESEARCH') || isHunterActivityActive(activity, 'LOAD_CACHE')) && <HunterActivityStatus label={loadingLabel} detail="Status aktivitas—bukan persentase atau estimasi penyelesaian." />}{actionError?.action === 'START_RESEARCH' && <div className="hunter-action-feedback error" role="alert">{actionError.message}</div>}{actionNotice && ['LOAD_CACHE', 'START_RESEARCH'].includes(actionNotice.action) && <div className="hunter-action-feedback success" role="status">{actionNotice.message}</div>}{!AI_ENABLED && <small>AI belum diaktifkan untuk environment ini.</small>}</>}
     </section>}
-    {hasCurrentBrief && <HunterBriefView briefRecord={brief} age={age} isHere={isHere} loading={loading} visibleTargets={visibleTargets} categories={categoryFocus} budgetIdr={budgetIdr} marketGoal={marketGoal} activeSection={activeSection} refreshPending={pendingRefresh} onRefresh={() => setPendingRefresh(true)} onConfirmRefresh={() => void confirmRefresh()} onCancelRefresh={() => setPendingRefresh(false)} onToggleHere={() => void toggleHere()} onSaveTarget={saveTarget} sourceCandidates={sourceCandidates} notSeen={notSeen} onNotSeen={markNotSeen} onCheck={(target) => { const decision = routeHunterInteraction({ action: 'item_check', state: routerState() }); if (decision.type === 'ITEM_CHECK') { setCheckTarget(target); setCheckFiles([]); setCheckPrice(''); setItemCheck(null); setCheckError('') } }} />}
-    <form className="hunter-composer" onSubmit={submitInput}><label className="sr-only" htmlFor="hunter-question">Tulis pesan ke AI Hunter</label><textarea id="hunter-question" rows="2" maxLength="1000" value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submitInput(event) } }} placeholder={preflightStep === 'destination' ? 'Tulis lokasi hunting…' : preflightStep === 'budget' ? 'Atau tulis budget, contoh 500 ribu…' : preflightStep === 'category' ? 'Atau tulis kategori, contoh jaket…' : preflightStep === 'market' ? 'Pilih lokal, internasional, atau keduanya…' : 'Tanya alasan atau perbandingan dari brief tersimpan…'} disabled={loading} /><button className="hunter-send" type="submit" disabled={loading || !question.trim()} aria-label="Kirim pesan">{loading ? '…' : 'Kirim ↑'}</button></form>
-    {hasCurrentBrief && <div className="hunter-suggested-filters"><button type="button" onClick={() => void choosePreflight('filter', { field: 'category', value: ['T-shirts', 'Jackets'] }, 'Kaos + jaket')}>Kaos + jaket</button><button type="button" onClick={() => void choosePreflight('filter', { field: 'budget', value: 300000 }, 'Budget Rp300k')}>Modal Rp300k</button><button type="button" onClick={() => void choosePreflight('filter', { field: 'market', value: marketGoal === 'international' ? 'both' : 'international' }, marketGoal === 'international' ? 'Tampilkan semua' : 'Internasional saja')}>{marketGoal === 'international' ? 'Tampilkan semua' : 'Internasional saja'}</button><button type="button" onClick={() => void choosePreflight('filter', { field: 'section', value: 'wildcard' }, 'Tampilkan wildcard')}>Wildcard</button><button type="button" onClick={() => void choosePreflight('filter', { field: 'section', value: 'priority' }, 'Prioritas utama')}>Prioritas</button><button type="button" onClick={() => void handleText('paling murah')}>Paling murah</button><button type="button" onClick={() => void choosePreflight('filter', { field: 'category', value: [] }, 'Semua kategori')}>Semua kategori</button><button type="button" onClick={() => void handleText('reset filter')}>Reset filter</button><button type="button" onClick={() => { const decision = routeHunterInteraction({ action: 'restart', state: routerState() }); void applyRouterState(decision.state); setPreflightStep('destination'); appendLocalExchange('Rencana baru', decision.reply) }}>Rencana baru</button></div>}
-    {checkTarget && <HunterItemCheckSheet target={checkTarget} destination={destination} sessionId={sessionId} briefId={brief?.id} files={checkFiles} setFiles={setCheckFiles} askingPrice={checkPrice} setAskingPrice={setCheckPrice} result={itemCheck} setResult={setItemCheck} busy={checkBusy} setBusy={setCheckBusy} error={checkError} setError={setCheckError} onClose={() => setCheckTarget(null)} onAnalyze={async (imageDataUrls) => analyzeItemThroughRouter({ feature: 'HUNTER_ITEM_CHECK', session_id: sessionId, message: 'Secondary in-location photo check', destination, asking_price_idr: Number(checkPrice), target: checkTarget ? { target_id: checkTarget.target_id, item_name: checkTarget.item_name, category: checkTarget.category, ideal_buy_high_idr: checkTarget.ideal_buy_high_idr, max_buy_price_idr: checkTarget.max_buy_price_idr, resale_low: checkTarget.resale_low, resale_high: checkTarget.resale_high, resale_currency: checkTarget.resale_currency, source_urls: checkTarget.source_urls } : null, brief_id: brief?.id, image_data_urls: imageDataUrls })} onSaveCandidate={async (result) => { const created = await saveTarget({ ...checkTarget, authenticity_risk: result.authenticity_risk }, result.verdict === 'CHECK' ? 'CHECK' : 'WATCHING'); if (created) setCheckTarget(null) }} />}
+    {hasCurrentBrief && <HunterBriefView briefRecord={brief} age={age} isHere={isHere} loading={loading} activity={activity} activityLabel={loadingLabel} actionError={actionError} actionNotice={actionNotice} visibleTargets={visibleTargets} categories={categoryFocus} budgetIdr={budgetIdr} marketGoal={marketGoal} activeSection={activeSection} refreshPending={pendingRefresh} onRefresh={() => { setError(''); setActionError(null); setPendingRefresh(true) }} onConfirmRefresh={() => void confirmRefresh()} onCancelRefresh={() => setPendingRefresh(false)} onToggleHere={() => void toggleHere()} onSaveTarget={saveTarget} sourceCandidates={sourceCandidates} notSeen={notSeen} onNotSeen={markNotSeen} onCheck={(target) => { const decision = routeHunterInteraction({ action: 'item_check', state: routerState() }); if (decision.type === 'ITEM_CHECK' && !loading) { setActionError(null); setActionNotice(null); setCheckTarget(target); setCheckFiles([]); setCheckPrice(''); setItemCheck(null); setCheckError('') } }} />}
+    <form className={`hunter-composer${isHunterActivityActive(activity, 'AI_CHAT') ? ' is-busy' : ''}`} onSubmit={submitInput} aria-busy={loading}><label className="sr-only" htmlFor="hunter-question">Tulis pesan ke AI Hunter</label>{isHunterActivityActive(activity, 'AI_CHAT') && <HunterActivityStatus label={loadingLabel} detail="Jawaban disusun dari brief tersimpan." compact />}<textarea id="hunter-question" rows="2" maxLength="1000" value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); submitInput(event) } }} placeholder={preflightStep === 'destination' ? 'Tulis lokasi hunting…' : preflightStep === 'budget' ? 'Atau tulis budget, contoh 500 ribu…' : preflightStep === 'category' ? 'Atau tulis kategori, contoh jaket…' : preflightStep === 'market' ? 'Pilih lokal, internasional, atau keduanya…' : 'Tanya alasan atau perbandingan dari brief tersimpan…'} disabled={loading} /><button className="hunter-send" type="submit" disabled={loading || !question.trim()} aria-busy={isHunterActivityActive(activity, 'AI_CHAT')} aria-label={isHunterActivityActive(activity, 'AI_CHAT') ? 'Menyiapkan jawaban' : 'Kirim pesan'}>{isHunterActivityActive(activity, 'AI_CHAT') ? <><HunterSpinner /> Membalas…</> : 'Kirim ↑'}</button>{actionError?.action === 'AI_CHAT' && <div className="hunter-action-feedback error" role="alert">{actionError.message}</div>}</form>
+    {hasCurrentBrief && <div className="hunter-suggested-filters" aria-busy={loading}>{[["Kaos + jaket", () => void choosePreflight('filter', { field: 'category', value: ['T-shirts', 'Jackets'] }, 'Kaos + jaket')], ["Modal Rp300k", () => void choosePreflight('filter', { field: 'budget', value: 300000 }, 'Budget Rp300k')], [marketGoal === 'international' ? 'Tampilkan semua' : 'Internasional saja', () => void choosePreflight('filter', { field: 'market', value: marketGoal === 'international' ? 'both' : 'international' }, marketGoal === 'international' ? 'Tampilkan semua' : 'Internasional saja')], ['Wildcard', () => void choosePreflight('filter', { field: 'section', value: 'wildcard' }, 'Tampilkan wildcard')], ['Prioritas', () => void choosePreflight('filter', { field: 'section', value: 'priority' }, 'Prioritas utama')], ['Paling murah', () => void handleText('paling murah')], ['Semua kategori', () => void choosePreflight('filter', { field: 'category', value: [] }, 'Semua kategori')], ['Reset filter', () => void handleText('reset filter')], ['Rencana baru', () => { const decision = routeHunterInteraction({ action: 'restart', state: routerState() }); void applyRouterState(decision.state); setPreflightStep('destination'); appendLocalExchange('Rencana baru', decision.reply) }]].map(([label, action]) => <button type="button" key={label} disabled={loading} onClick={action}>{label}</button>)}</div>}
+    {checkTarget && <HunterItemCheckSheet target={checkTarget} files={checkFiles} setFiles={setCheckFiles} askingPrice={checkPrice} setAskingPrice={setCheckPrice} result={itemCheck} setResult={setItemCheck} busy={checkBusy || isHunterActivityActive(activity, 'ITEM_CHECK')} activityLabel={loadingLabel} error={checkError} setError={setCheckError} onClose={() => { if (!checkBusy && !loading) setCheckTarget(null) }} onAnalyze={async (imageDataUrls) => analyzeItemThroughRouter({ feature: 'HUNTER_ITEM_CHECK', session_id: sessionId, message: 'Secondary in-location photo check', destination, asking_price_idr: Number(checkPrice), target: checkTarget ? { target_id: checkTarget.target_id, item_name: checkTarget.item_name, category: checkTarget.category, ideal_buy_high_idr: checkTarget.ideal_buy_high_idr, max_buy_price_idr: checkTarget.max_buy_price_idr, resale_low: checkTarget.resale_low, resale_high: checkTarget.resale_high, resale_currency: checkTarget.resale_currency, source_urls: checkTarget.source_urls } : null, brief_id: brief?.id, image_data_urls: imageDataUrls })} onSaveCandidate={async (result) => { const created = await saveTarget({ ...checkTarget, authenticity_risk: result.authenticity_risk }, result.verdict === 'CHECK' ? 'CHECK' : 'WATCHING'); if (created) setCheckTarget(null) }} />}
   </div>
 }
 
-function HunterBriefView({ briefRecord, age, isHere, loading, visibleTargets, categories, budgetIdr, marketGoal, activeSection, refreshPending, onRefresh, onConfirmRefresh, onCancelRefresh, onToggleHere, onSaveTarget, sourceCandidates, notSeen, onNotSeen, onCheck }) {
+function HunterBriefView({ briefRecord, age, isHere, loading, activity, activityLabel, actionError, actionNotice, visibleTargets, categories, budgetIdr, marketGoal, activeSection, refreshPending, onRefresh, onConfirmRefresh, onCancelRefresh, onToggleHere, onSaveTarget, sourceCandidates, notSeen, onNotSeen, onCheck }) {
   const { brief, citations = [] } = briefRecord
   const sections = [
     ['priority', '🔥 Prioritas utama', 'TOP PRIORITY'],
@@ -396,17 +436,26 @@ function HunterBriefView({ briefRecord, age, isHere, loading, visibleTargets, ca
     {sections.filter(([key]) => activeSection === 'all' || activeSection === key).map(([key, title, label]) => {
       const targets = (brief.sections?.[key] || []).filter((target) => visibleIds.has(target.target_id))
       if (!targets.length) return null
-      return <section className="hunter-target-section" key={key}><h3>{title}<small>{label}</small></h3><div className="hunter-target-list">{targets.map((target, index) => <HunterTargetCard key={target.target_id || `${key}-${index}`} target={target} citations={citations} section={key} isHere={isHere} saved={sourceCandidates[target.target_id]} notSeen={Boolean(notSeen[target.target_id])} onSave={() => onSaveTarget(target)} onFound={() => onSaveTarget(target, 'CHECK')} onNotSeen={() => onNotSeen(target)} onCheck={() => onCheck(target)} />)}</div></section>
+      return <section className="hunter-target-section" key={key}><h3>{title}<small>{label}</small></h3><div className="hunter-target-list">{targets.map((target, index) => <HunterTargetCard key={target.target_id || `${key}-${index}`} target={target} citations={citations} section={key} isHere={isHere} actionsDisabled={loading} saved={sourceCandidates[target.target_id]} notSeen={Boolean(notSeen[target.target_id])} onSave={() => onSaveTarget(target)} onFound={() => onSaveTarget(target, 'CHECK')} onNotSeen={() => onNotSeen(target)} onCheck={() => onCheck(target)} />)}</div></section>
     })}
     {!visibleCount && <div className="hunter-empty">Tidak ada target di brief yang cocok dengan filter ini. Coba longgarkan budget/kategori, atau minta fokus lain.</div>}
     {!!brief.new_discoveries?.length && <section className="hunter-discoveries"><h3>Barang yang mungkin belum kamu kenal<small>ITEMS WORTH LEARNING</small></h3><div className="hunter-discovery-list">{brief.new_discoveries.slice(0, 3).map((item, index) => <article key={`${item.name}-${index}`}><strong>{item.name}</strong><p>{item.what_it_is}</p><div><b>Ciri / quick ID:</b> {item.quick_identification}</div><div><b>Tag:</b> {(item.tags_to_check || []).join(', ') || '—'}</div><div><b>Fake risk:</b> {item.fake_risk}</div><div><b>Demand:</b> {item.demand_signal}</div><p>{item.why_learn}</p><SourceLinks urls={item.source_urls} citations={citations} /></article>)}</div></section>}
     {!!brief.internal_insights?.length && <section className="hunter-internal-insights"><h3>Insight Haqlooks / Internal signal</h3>{brief.internal_insights.map((insight, index) => <p key={index}>{insight}</p>)}</section>}
     <details className="hunter-sources"><summary>Sumber riset / Research sources ({citations.length})</summary><SourceLinks urls={citations.map((item) => item.url)} citations={citations} /></details>
-    <footer className="hunter-brief-actions"><button className={`hunter-here-button ${isHere ? 'active' : ''}`} type="button" onClick={onToggleHere}>{isHere ? '✓ Saya Sudah Sampai / I’m Here' : 'Saya Sudah Sampai / I’m Here'}</button>{refreshPending ? <div className="hunter-refresh-confirm"><span>Refresh dapat memakai AI dan mencari web baru.</span><button type="button" className="hunter-refresh-button" disabled={loading} onClick={onConfirmRefresh}>Konfirmasi Refresh</button><button type="button" className="hunter-preflight-edit" disabled={loading} onClick={onCancelRefresh}>Batal</button></div> : <button type="button" className="hunter-refresh-button" disabled={loading} onClick={onRefresh}>Perbarui Research</button>}</footer>
+    <footer className="hunter-brief-actions"><button className={`hunter-here-button ${isHere ? 'active' : ''}`} type="button" disabled={loading} onClick={onToggleHere}>{isHere ? '✓ Saya Sudah Sampai / I’m Here' : 'Saya Sudah Sampai / I’m Here'}</button><div className={`hunter-refresh-area${refreshPending ? ' pending' : ''}`} aria-busy={isHunterActivityActive(activity, 'REFRESH_RESEARCH')}>
+      {actionNotice?.action === 'REFRESH_RESEARCH' && <div className="hunter-action-feedback success" role="status">{actionNotice.message}</div>}
+      {refreshPending ? <div className="hunter-refresh-confirm">
+        <span>Refresh dapat memakai AI dan mencari web baru.</span>
+        {isHunterActivityActive(activity, 'REFRESH_RESEARCH') && <HunterActivityStatus label={activityLabel} detail="AI sedang mencari referensi terbaru dan menyusun ulang Hunting Brief. Bisa membutuhkan beberapa detik; status ini bukan estimasi progres." />}
+        {actionError?.action === 'REFRESH_RESEARCH' && <div className="hunter-action-feedback error" role="alert">{actionError.message}</div>}
+        <button type="button" className="hunter-refresh-button" disabled={loading} aria-busy={isHunterActivityActive(activity, 'REFRESH_RESEARCH')} onClick={onConfirmRefresh}>{isHunterActivityActive(activity, 'REFRESH_RESEARCH') ? <><HunterSpinner /> Sedang memperbarui riset…</> : 'Konfirmasi Refresh'}</button>
+        <button type="button" className="hunter-preflight-edit" disabled={loading} onClick={onCancelRefresh}>Batal</button>
+      </div> : <><button type="button" className="hunter-refresh-button" disabled={loading} onClick={onRefresh}>Perbarui Research</button>{actionError?.action === 'REFRESH_RESEARCH' && <div className="hunter-action-feedback error" role="alert">{actionError.message}</div>}</>}
+    </div></footer>
   </section>
 }
 
-function HunterTargetCard({ target, citations, section, isHere, saved, notSeen, onSave, onFound, onNotSeen, onCheck }) {
+function HunterTargetCard({ target, citations, section, isHere, actionsDisabled, saved, notSeen, onSave, onFound, onNotSeen, onCheck }) {
   const sourceUrls = Array.isArray(target.source_urls) ? target.source_urls : []
   return <article className="hunter-target-card">
     <div className="hunter-target-title"><span>{target.category || 'Fashion'} · PERKIRAAN / SOURCING HYPOTHESIS</span><h4>{target.item_name}</h4></div>
@@ -417,7 +466,7 @@ function HunterTargetCard({ target, citations, section, isHere, saved, notSeen, 
     <div className="hunter-target-meta"><span><b>Marketplace fit:</b> {Object.entries(target.marketplace_fit || {}).map(([market, fit]) => `${market}: ${fit.fit}`).join(' · ') || 'Belum diketahui'}</span><span><b>International fit:</b> {target.international_fit || 'unknown'}</span><span><b>Risiko keaslian:</b> {target.authenticity_risk || 'Authenticity not verified; manual review required.'}</span></div>
     <details className="hunter-inspection"><summary>Checklist inspeksi / Inspection checklist</summary><ul>{(target.inspection_checklist || []).map((item, index) => <li key={index}>{item}</li>)}</ul></details>
     {sourceUrls.length > 0 && <SourceLinks urls={sourceUrls} citations={citations} />}
-    <div className="hunter-target-actions">{isHere ? <><button type="button" disabled={Boolean(saved) || notSeen} className="hunter-found-button" onClick={onFound}>{saved ? '✓ Disimpan · CHECK' : 'Ditemukan / Found'}</button><button type="button" className={`hunter-not-seen ${notSeen ? 'active' : ''}`} onClick={onNotSeen}>{notSeen ? 'Tidak ada ✓' : 'Tidak ada / Not seen'}</button></> : <button type="button" disabled={Boolean(saved)} className="hunter-save-button" onClick={onSave}>{saved ? '✓ Tersimpan ke Sourcing' : 'Simpan ke Sourcing'}</button>}<button type="button" className="hunter-check-button" onClick={onCheck}>Cek Barang Ini / Check This Item</button></div>
+    <div className="hunter-target-actions">{isHere ? <><button type="button" disabled={actionsDisabled || Boolean(saved) || notSeen} className="hunter-found-button" onClick={onFound}>{saved ? '✓ Disimpan · CHECK' : 'Ditemukan / Found'}</button><button type="button" disabled={actionsDisabled} className={`hunter-not-seen ${notSeen ? 'active' : ''}`} onClick={onNotSeen}>{notSeen ? 'Tidak ada ✓' : 'Tidak ada / Not seen'}</button></> : <button type="button" disabled={actionsDisabled || Boolean(saved)} className="hunter-save-button" onClick={onSave}>{saved ? '✓ Tersimpan ke Sourcing' : 'Simpan ke Sourcing'}</button>}<button type="button" disabled={actionsDisabled} className="hunter-check-button" onClick={onCheck}>Cek Barang Ini / Check This Item</button></div>
     {section === 'caution' && <small className="hunter-risk-note">Risiko tinggi: minta foto/tag tambahan, jangan putuskan keaslian dari tampilan saja.</small>}
   </article>
 }
@@ -427,7 +476,7 @@ function SourceLinks({ urls = [], citations = [] }) {
   return <ul className="hunter-source-links">{urls.map((url) => { const source = sourceFor(url, citations); return <li key={url}><a href={source.url} target="_blank" rel="noreferrer">{source.title}</a></li> })}</ul>
 }
 
-function HunterItemCheckSheet({ target, files, setFiles, askingPrice, setAskingPrice, result, setResult, busy, setBusy, error, setError, onClose, onAnalyze, onSaveCandidate }) {
+function HunterItemCheckSheet({ target, files, setFiles, askingPrice, setAskingPrice, result, setResult, busy, setBusy, activityLabel, error, setError, onClose, onAnalyze, onSaveCandidate }) {
   const [previews, setPreviews] = useState([])
   useEffect(() => { const urls = files.map((file) => URL.createObjectURL(file)); setPreviews(urls); return () => urls.forEach((url) => URL.revokeObjectURL(url)) }, [files])
   async function analyze(event) {
@@ -449,7 +498,7 @@ function HunterItemCheckSheet({ target, files, setFiles, askingPrice, setAskingP
     } catch (caught) { setError(errorMessage(caught, 'Foto belum bisa dianalisis.')) }
     finally { setBusy(false) }
   }
-  return <div className="hunter-check-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}><section className="hunter-check-sheet" role="dialog" aria-modal="true" aria-labelledby="hunter-check-title"><header><div><small>SECONDARY ACTION / CEK BARANG</small><h2 id="hunter-check-title">Check this item</h2><p>{target?.item_name || 'Cek foto barang yang ditemukan'}</p></div><button type="button" aria-label="Tutup" onClick={onClose}>×</button></header><form onSubmit={analyze}><label className="hunter-upload-label">Foto barang / Product photos<input type="file" accept="image/*" multiple onChange={(event) => { setFiles([...event.target.files].slice(0, 3)); setError('') }} /></label><span className="hunter-upload-hint">1–3 foto · diperkecil di perangkat · tidak disimpan sebagai stok</span>{previews.length > 0 && <div className="hunter-preview-grid">{previews.map((url, index) => <img key={url} src={url} alt={`Product photo ${index + 1}`} />)}</div>}<label>Harga penjual / Asking price (IDR)<input type="number" min="1" inputMode="numeric" value={askingPrice} onChange={(event) => setAskingPrice(event.target.value)} placeholder="150000" /></label>{error && <div className="hunter-error" role="alert">{error}</div>}<div className="hunter-check-actions"><button className="hunter-check-primary" disabled={busy || !AI_ENABLED}>{busy ? 'Menganalisis foto…' : 'Analisis foto'}</button><button type="button" className="hunter-check-secondary" onClick={onClose}>Batal</button></div></form>{result && <section className="hunter-check-result"><div className={`hunter-verdict ${String(result.verdict).toLowerCase()}`}>{result.verdict}</div><p><b>Target match:</b> {result.target_match}</p><p><b>Kondisi:</b> {result.condition_summary}</p><p><b>Minus terlihat:</b> {(result.visible_defects || []).join(' · ') || 'Tidak terlihat jelas'}</p><p><b>Authenticity risk:</b> {result.authenticity_risk}</p><p className="hunter-auth-warning">{result.authenticity_note}</p><p><b>Market fit:</b> {result.market_fit}</p>{result.possible_gross_margin_idr != null && <p><b>Possible gross margin:</b> {moneyIdr(result.possible_gross_margin_idr)} <small>(screening estimate only)</small></p>}<ul>{(result.inspection_checklist || []).map((item, index) => <li key={index}>{item}</li>)}</ul><button type="button" className="hunter-check-primary" onClick={() => void onSaveCandidate(result)}>Save candidate to Sourcing</button></section>}</section></div>
+  return <div className="hunter-check-overlay" role="presentation" onMouseDown={(event) => { if (!busy && event.target === event.currentTarget) onClose() }}><section className="hunter-check-sheet" role="dialog" aria-modal="true" aria-labelledby="hunter-check-title" aria-busy={busy}><header><div><small>SECONDARY ACTION / CEK BARANG</small><h2 id="hunter-check-title">Check this item</h2><p>{target?.item_name || 'Cek foto barang yang ditemukan'}</p></div><button type="button" aria-label="Tutup" disabled={busy} onClick={onClose}>×</button></header><form onSubmit={analyze} aria-busy={busy}><label className="hunter-upload-label">Foto barang / Product photos<input type="file" accept="image/*" multiple disabled={busy} onChange={(event) => { setFiles([...event.target.files].slice(0, 3)); setError('') }} /></label><span className="hunter-upload-hint">1–3 foto · diperkecil di perangkat · tidak disimpan sebagai stok</span>{previews.length > 0 && <div className="hunter-preview-grid">{previews.map((url, index) => <img key={url} src={url} alt={`Product photo ${index + 1}`} />)}</div>}<label>Harga penjual / Asking price (IDR)<input type="number" min="1" inputMode="numeric" disabled={busy} value={askingPrice} onChange={(event) => setAskingPrice(event.target.value)} placeholder="150000" /></label>{error && <div className="hunter-error" role="alert">{error}</div>}<div className="hunter-check-actions"><button className="hunter-check-primary" disabled={busy || !AI_ENABLED} aria-busy={busy}>{busy ? <><HunterSpinner /> Menganalisis…</> : 'Analisis foto'}</button><button type="button" className="hunter-check-secondary" disabled={busy} onClick={onClose}>Batal</button></div>{busy && <HunterActivityStatus label={activityLabel || 'Menganalisis foto barang…'} detail="Foto sedang diperiksa. Ini bukan indikator persentase penyelesaian." />}</form>{result && <section className="hunter-check-result"><div className={`hunter-verdict ${String(result.verdict).toLowerCase()}`}>{result.verdict}</div><p><b>Target match:</b> {result.target_match}</p><p><b>Kondisi:</b> {result.condition_summary}</p><p><b>Minus terlihat:</b> {(result.visible_defects || []).join(' · ') || 'Tidak terlihat jelas'}</p><p><b>Authenticity risk:</b> {result.authenticity_risk}</p><p className="hunter-auth-warning">{result.authenticity_note}</p><p><b>Market fit:</b> {result.market_fit}</p>{result.possible_gross_margin_idr != null && <p><b>Possible gross margin:</b> {moneyIdr(result.possible_gross_margin_idr)} <small>(screening estimate only)</small></p>}<ul>{(result.inspection_checklist || []).map((item, index) => <li key={index}>{item}</li>)}</ul><button type="button" disabled={busy} className="hunter-check-primary" onClick={() => void onSaveCandidate(result)}>Save candidate to Sourcing</button></section>}</section></div>
 }
 
 export function HunterAnalyticsPage() {
