@@ -38,6 +38,22 @@ export function reservationCostIdr(model: string) {
   return estimateCostIdr(model, maxInputTokens, maxOutputTokens)
 }
 
+export function estimateHunterCostIdr(model: string, inputTokens: number, outputTokens: number, cachedInputTokens = 0, webSearchCalls = 0) {
+  const tokenCost = estimateCostIdr(model, inputTokens, outputTokens, cachedInputTokens)
+  const webSearchUsdPer1k = configuredNumber('OPENAI_WEB_SEARCH_USD_PER_1K_CALLS', 10)
+  const idrPerUsd = modelPricing(model).idrPerUsd
+  const toolCostIdr = Number(((Math.max(0, webSearchCalls) / 1000) * webSearchUsdPer1k * idrPerUsd).toFixed(6))
+  return { tokenCostIdr: tokenCost, toolCostIdr, totalCostIdr: Number((tokenCost + toolCostIdr).toFixed(6)) }
+}
+
+export function hunterReservationCostIdr(model: string, mode: 'research' | 'chat' | 'item_check') {
+  const inputTokens = mode === 'research' ? 60_000 : mode === 'item_check' ? 45_000 : 12_000
+  const outputTokens = mode === 'research' ? 7_000 : mode === 'item_check' ? 2_000 : 1_500
+  const webSearchCalls = mode === 'research' ? 10 : 0
+  return estimateHunterCostIdr(model, inputTokens, outputTokens, 0, webSearchCalls).totalCostIdr
+}
+
 export function maxOutputTokens() {
   return Math.max(200, Math.floor(configuredNumber('AI_MAX_OUTPUT_TOKENS', 1600)))
 }
+

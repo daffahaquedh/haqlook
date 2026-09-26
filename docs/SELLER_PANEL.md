@@ -14,7 +14,8 @@ Marketplace integrations are intentionally manual. HAQLOOKS stores listing statu
 - `/seller/inventory` — searchable, paginated master inventory
 - `/seller/inventory/new` — mobile-first add item flow with up to 10 images
 - `/seller/inventory/:id` — inventory detail, marketplace status, and sold flow
-- `/seller/ai-hunter` — manual sourcing queue / future AI Hunter surface
+- `/seller/ai-hunter` — chat-first AI sourcing copilot, destination briefs, and in-market checklist
+- `/seller/hunter-analytics` — ADMIN-only aggregated Hunter engagement and conversion
 - `/seller/sourcing` — sourcing candidate database and move-to-inventory flow
 - `/seller/listings` — listing tracking overview
 - `/seller/sales` — sales and profit ledger
@@ -69,7 +70,17 @@ Item Analysis uses `gpt-6-luna` with Responses API reasoning effort `low`. The O
 
 The product detail action is intentionally review-first: AI output is shown in a mobile-friendly sheet, every mapped product field is opt-in, and `APPLY SUGGESTIONS` is the only path that updates the product. The result always carries `authenticity_not_verified` and `manual verification required`; AI never claims authentication.
 
-When `OPENAI_API_KEY` is absent, or `VITE_AI_ENABLED=false`, the UI clearly reports that AI is not active and inventory remains usable. The current branch keeps the browser flag disabled until the server secret is configured and the Edge Function is verified on preview.
+When `OPENAI_API_KEY` is absent, or `VITE_AI_ENABLED=false`, the UI clearly reports that AI is not active and inventory remains usable. Keep the local example flag disabled; deployment environments may enable the UI only after the server secret and function are ready.
+
+## AI Hunter / Sourcing Copilot V1
+
+`/seller/ai-hunter` starts with “Hari ini mau hunting ke mana?” and quick destination choices. Seller chat, destination briefs, explicit refresh, and the secondary photo checker are routed through the existing authenticated `seller-ai` Supabase Edge Function. Research uses the Responses API with `gpt-6-luna`, reasoning `medium`, built-in `web_search`, and a ten-tool-call cap. Chat and photo checks use reasoning `low` and never receive a web-search tool.
+
+Destination briefs are shared by destination for 12 hours. A normal repeat request reads the unexpired database cache and does not call OpenAI; an explicit refresh bypasses that cache. Focus/category/budget/international follow-ups filter or rank the saved brief without a new search. Public URLs are retained only when they appear in actual Responses citation annotations. Prices and max-buy values are withheld if their source/rationale checks fail. Every item target is labeled a `SOURCING_HYPOTHESIS`; the feature never claims current physical stock or photo-based authenticity.
+
+Sessions and messages are private to their authenticated staff owner under RLS; shared citation-backed briefs are readable only to staff and written by the Edge Function service client. The photo checker resizes 1–3 photos in the browser, sends them for analysis without saving originals or creating inventory, and returns a manual-authentication warning. Chat text is redacted before persistence and model use; internal catalog/sales inputs are aggregated with a three-record minimum and exclude customer data.
+
+The additive migrations `20260926082014_hunter_sourcing_copilot_v1.sql` and `20260926082339_hunter_sourcing_analytics_indexes.sql` add Hunter session/message/cache tables, usage fields/features, sourcing links, budget RPCs, and admin-only aggregate analytics. No existing product rows are rewritten. Hunter calls log `HUNTER_CHAT`, `HUNTER_DESTINATION_BRIEF`, `HUNTER_REFRESH`, or `HUNTER_ITEM_CHECK`; the centralized server pricing module includes token pricing and the OpenAI web-search call rate. The shared monthly budget reservation blocks calls before provider spend; the page shows a warning from 90% usage onward.
 
 ## Telegram plan
 
@@ -103,3 +114,4 @@ The endpoint must authenticate the bot, validate the payload, create a master in
 - Image uploads are capped at 10 files and 8 MB per file in the client; Storage policies remain authoritative.
 - AI prompt input is allow-listed and excludes buyer PII, passwords, payment data, and marketplace credentials.
 - Marketplace listing changes remain manual and are never automated.
+

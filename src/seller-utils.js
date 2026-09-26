@@ -31,6 +31,7 @@ export const SELLER_WORKSPACE_LINKS = [
 
 export const ADMIN_WORKSPACE_LINKS = [
   ['/seller/analytics', 'Analytics', '▤'],
+  ['/seller/hunter-analytics', 'Hunter Analytics', '⌕'],
   ['/seller/ai-usage', 'AI Usage', '◒'],
   ['/seller/users-roles', 'Users / Roles', '♙'],
   ['/seller/marketplace-settings', 'Marketplace Settings', '↗'],
@@ -38,7 +39,7 @@ export const ADMIN_WORKSPACE_LINKS = [
   ['/seller/app-settings', 'App Settings', '⌘'],
 ]
 
-export const ADMIN_ONLY_SECTIONS = ['analytics', 'ai-usage', 'users-roles', 'marketplace-settings', 'settings', 'app-settings']
+export const ADMIN_ONLY_SECTIONS = ['analytics', 'hunter-analytics', 'ai-usage', 'users-roles', 'marketplace-settings', 'settings', 'app-settings']
 
 export function workspaceLinksForRole(role) {
   return String(role || '').toUpperCase() === 'ADMIN'
@@ -129,3 +130,4 @@ export function safeHttpUrl(value) {
 export function titleCaseStatus(value = '') {
   return String(value).replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
+

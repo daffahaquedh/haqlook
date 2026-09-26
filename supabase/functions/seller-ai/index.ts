@@ -3,6 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { DEFAULT_MODEL, estimateCostIdr, maxOutputTokens, reservationCostIdr } from './pricing.ts'
 import { ITEM_ANALYSIS_SCHEMA, normalizeItemAnalysis } from './analysis-schema.ts'
 import { createItemAnalysisRequest } from './analysis-request.js'
+import { handleHunterRequest } from './hunter-handler.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -88,11 +89,15 @@ Deno.serve(async (request) => {
   const role = String(profile?.role || '').toUpperCase()
   if (profileError || !['ADMIN', 'SELLER'].includes(role)) return errorResponse('ROLE_NOT_ALLOWED', 'This action is limited to ADMIN and SELLER accounts.', 403)
 
-  const openAiKey = Deno.env.get('OPENAI_API_KEY')
-  if (!openAiKey) return errorResponse('AI_NOT_CONFIGURED', 'AI belum diaktifkan di server. Inventory tetap dapat digunakan.', 503)
-
   const body = await request.json().catch(() => null) as Record<string, unknown> | null
-  if (!body || body.feature !== 'ITEM_ANALYSIS') return errorResponse('INVALID_FEATURE', 'Only ITEM_ANALYSIS is enabled in this V1.', 400)
+  if (!body) return errorResponse('INVALID_REQUEST', 'Request body must be valid JSON.', 400)
+  const openAiKey = Deno.env.get('OPENAI_API_KEY')
+  if (String(body.feature || '').startsWith('HUNTER_')) {
+    if (!openAiKey) return errorResponse('AI_NOT_CONFIGURED', 'AI belum diaktifkan di server. Sourcing manual tetap tersedia.', 503)
+    return handleHunterRequest({ supabase, user, role, body, openAiKey, supabaseUrl, corsHeaders })
+  }
+  if (!openAiKey) return errorResponse('AI_NOT_CONFIGURED', 'AI belum diaktifkan di server. Inventory tetap dapat digunakan.', 503)
+  if (body.feature !== 'ITEM_ANALYSIS') return errorResponse('INVALID_FEATURE', 'Only ITEM_ANALYSIS and Hunter features are enabled.', 400)
   const productId = typeof body.product_id === 'string' ? body.product_id : ''
   if (!productId) return errorResponse('PRODUCT_REQUIRED', 'Save the item before running AI Analyze.', 400)
 
@@ -176,3 +181,4 @@ Deno.serve(async (request) => {
   const { data: usage } = await supabase.rpc('seller_ai_usage_summary')
   return response({ ok: true, feature: 'ITEM_ANALYSIS', model, result, usage: usage || null })
 })
+
