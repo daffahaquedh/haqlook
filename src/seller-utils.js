@@ -10,6 +10,55 @@ export const MARKETPLACES = [
 export const INVENTORY_STATUSES = ['draft', 'available', 'reserved', 'sold', 'archived']
 export const LISTING_STATUSES = ['NOT_LISTED', 'DRAFT', 'LISTED', 'SOLD', 'REMOVED']
 
+export const PRODUCT_DETAIL_TABS = [
+  { id: 'summary', label: 'Ringkas' },
+  { id: 'marketplace', label: 'Marketplace' },
+  { id: 'sales', label: 'Penjualan' },
+]
+
+export function productDetailTabForKey(currentTab, key) {
+  const index = PRODUCT_DETAIL_TABS.findIndex((tab) => tab.id === currentTab)
+  if (index < 0) return PRODUCT_DETAIL_TABS[0].id
+  if (key === 'Home') return PRODUCT_DETAIL_TABS[0].id
+  if (key === 'End') return PRODUCT_DETAIL_TABS[PRODUCT_DETAIL_TABS.length - 1].id
+  if (key === 'ArrowRight') return PRODUCT_DETAIL_TABS[(index + 1) % PRODUCT_DETAIL_TABS.length].id
+  if (key === 'ArrowLeft') return PRODUCT_DETAIL_TABS[(index + PRODUCT_DETAIL_TABS.length - 1) % PRODUCT_DETAIL_TABS.length].id
+  return currentTab
+}
+
+export function productDetailPrimaryAction(item, listings = []) {
+  if (String(item?.status || '').toLowerCase() === 'sold') {
+    return { kind: 'tab', target: 'sales', label: 'Lihat penjualan' }
+  }
+  const incomplete = !String(item?.brand || '').trim()
+    || !String(item?.name || '').trim()
+    || !String(item?.size_label || '').trim()
+    || !String(item?.condition || '').trim()
+  if (String(item?.status || '').toLowerCase() === 'draft' || incomplete) {
+    return { kind: 'complete', target: 'edit', label: 'Lengkapi barang' }
+  }
+  const hasActiveListing = listings.some((listing) => ['DRAFT', 'LISTED'].includes(String(listing.listing_status || '').toUpperCase()))
+  return hasActiveListing
+    ? { kind: 'tab', target: 'marketplace', label: 'Kelola listing' }
+    : { kind: 'generator', target: 'marketplace', label: 'Buat listing' }
+}
+
+export function productDetailActiveListings(listings = [], soldVia) {
+  return listings.filter((listing) => ['LISTED', 'DRAFT'].includes(String(listing.listing_status || '').toUpperCase()) && listing.marketplace !== soldVia)
+}
+
+export function marketplaceStatusLabel(status = '') {
+  const labels = {
+    NOT_LISTED: 'Belum listing',
+    DRAFT: 'Draft',
+    LISTED: 'Tayang',
+    SOLD: 'Terjual',
+    REMOVED: 'Dihapus',
+  }
+  const key = String(status).toUpperCase()
+  return labels[key] || titleCaseStatus(status)
+}
+
 export const ITEM_ANALYSIS_SUGGESTIONS = [
   { key: 'detected_brand', label: 'Merek terdeteksi', labelEn: 'Detected brand', target: 'brand' },
   { key: 'suggested_title', label: 'Judul yang disarankan', labelEn: 'Suggested title', target: 'name' },
@@ -155,4 +204,5 @@ export function safeHttpUrl(value) {
 export function titleCaseStatus(value = '') {
   return String(value).replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
+
 

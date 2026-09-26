@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { HunterAnalyticsPage, HunterChatPage } from './hunter'
 import { AI_ENABLED, supabase } from './supabase-client'
 import ListingGenerator from './listing-generator'
+import './product-detail.css'
 import {
   budgetLabel,
   budgetTone,
@@ -14,7 +15,12 @@ import {
   ITEM_ANALYSIS_SUGGESTIONS,
   LISTING_STATUSES,
   MARKETPLACES,
+  PRODUCT_DETAIL_TABS,
   moneyIdr,
+  marketplaceStatusLabel,
+  productDetailActiveListings,
+  productDetailPrimaryAction,
+  productDetailTabForKey,
   safeHttpUrl,
   titleCaseStatus,
   workspaceMobileMoreGroupsForRole,
@@ -325,7 +331,7 @@ function NewInventory() {
 function Field({ label, value, onChange, type = 'text', placeholder, required = false, textarea = false, name }) { return <label>{label}{textarea ? <textarea name={name} value={value} onChange={onChange ? (event) => onChange(event.target.value) : undefined} placeholder={placeholder} rows="4" required={required} /> : <input name={name} type={type} value={value} onChange={onChange ? (event) => onChange(event.target.value) : undefined} placeholder={placeholder} required={required} />}</label> }
 
 function InventoryDetail({ id }) {
-  const [item, setItem] = useState(null); const [listings, setListings] = useState([]); const [sales, setSales] = useState([]); const [message, setMessage] = useState(''); const [editingListing, setEditingListing] = useState(null); const [showSold, setShowSold] = useState(false); const [showListingGenerator, setShowListingGenerator] = useState(false); const [analysis, setAnalysis] = useState(null); const [analysisBusy, setAnalysisBusy] = useState(false); const [analysisMessage, setAnalysisMessage] = useState(''); const [selectedSuggestions, setSelectedSuggestions] = useState({})
+  const [item, setItem] = useState(null); const [listings, setListings] = useState([]); const [sales, setSales] = useState([]); const [message, setMessage] = useState(''); const [editingListing, setEditingListing] = useState(null); const [showSold, setShowSold] = useState(false); const [showListingGenerator, setShowListingGenerator] = useState(false); const [analysis, setAnalysis] = useState(null); const [lastAnalysis, setLastAnalysis] = useState(null); const [analysisApplied, setAnalysisApplied] = useState(false); const [analysisBusy, setAnalysisBusy] = useState(false); const [analysisMessage, setAnalysisMessage] = useState(''); const [selectedSuggestions, setSelectedSuggestions] = useState({}); const [activeTab, setActiveTab] = useState('summary'); const tabRefs = useRef({})
   async function load() {
     if (!supabase) return
     const [{ data: product, error }, { data: listingData }, { data: saleData }] = await Promise.all([
@@ -335,7 +341,14 @@ function InventoryDetail({ id }) {
     ])
     if (error) setMessage(errorText(error, 'Inventory item not found.')); else { setItem(product); setListings(listingData || []); setSales(saleData || []) }
   }
-  useEffect(() => { load() }, [id])
+  useEffect(() => { setActiveTab('summary'); setMessage(''); setAnalysis(null); setLastAnalysis(null); setAnalysisApplied(false); setAnalysisMessage(''); setSelectedSuggestions({}); setEditingListing(null); setShowSold(false); setShowListingGenerator(false); load() }, [id])
+  function handleTabKeyDown(event, tabId) {
+    const nextTab = productDetailTabForKey(tabId, event.key)
+    if (nextTab === tabId || !PRODUCT_DETAIL_TABS.some((tab) => tab.id === nextTab)) return
+    event.preventDefault()
+    setActiveTab(nextTab)
+    requestAnimationFrame(() => tabRefs.current[nextTab]?.focus())
+  }
   async function analyzeItem() {
     if (!AI_ENABLED) { setAnalysisMessage('AI belum diaktifkan. Inventory tetap dapat digunakan.'); return }
     if (!supabase) { setAnalysisMessage('Supabase is not configured in this environment.'); return }
@@ -346,7 +359,7 @@ function InventoryDetail({ id }) {
     } else {
       const result = data.result || {}
       const defaults = Object.fromEntries(ITEM_ANALYSIS_SUGGESTIONS.map(({ key }) => [key, Boolean(analysisSuggestionValue(result, key))]))
-      setSelectedSuggestions(defaults); setAnalysis(data)
+      setSelectedSuggestions(defaults); setLastAnalysis(data); setAnalysisApplied(false); setAnalysis(data)
     }
     setAnalysisBusy(false)
   }
@@ -358,7 +371,7 @@ function InventoryDetail({ id }) {
     setAnalysisBusy(true)
     const { data, error } = await supabase.from('products').update({ ...updates, updated_at: new Date().toISOString() }).eq('id', id).select('*').single()
     if (error) setAnalysisMessage(errorText(error, 'Could not apply suggestions.'))
-    else { setItem(data); setAnalysis(null); setAnalysisMessage('Selected suggestions applied. Review the item before saving further changes.') }
+    else { setItem(data); setAnalysis(null); setAnalysisApplied(true); setAnalysisMessage('Saran terpilih diterapkan. Periksa kembali data barang sebelum melanjutkan.') }
     setAnalysisBusy(false)
   }
   async function saveListing(event) {
@@ -374,32 +387,115 @@ function InventoryDetail({ id }) {
     const { error } = await supabase.rpc('mark_product_sold', { p_product_id: id, p_sold_via: values.sold_via, p_sale_price: Number(values.sale_price || 0), p_marketplace_fee: Number(values.marketplace_fee || 0), p_payment_fee: Number(values.payment_fee || 0), p_shipping_subsidy: Number(values.shipping_subsidy || 0), p_other_cost: Number(values.other_cost || 0), p_notes: values.notes || null })
     if (error) setMessage(errorText(error, 'Could not mark this item sold.')); else { setShowSold(false); setMessage(`Sold recorded. Gross profit ${moneyIdr(profit.grossProfit)}, net profit ${moneyIdr(profit.netProfit)}.`); load() }
   }
-  if (!item) return message ? <div className="seller-empty"><strong>{message}</strong><button className="seller-secondary" onClick={() => go('/seller/inventory')}>Back to inventory</button></div> : <SellerLoading text="Loading item…" />
-  const activeListings = listings.filter((listing) => ['LISTED', 'DRAFT'].includes(listing.listing_status) && listing.marketplace !== sales[0]?.sold_via)
-  return (
-    <div>
-      <a className="seller-back-link" href="/seller/inventory" onClick={(event) => { event.preventDefault(); go('/seller/inventory') }}>← Back to inventory</a>
-      <SellerHeader eyebrow={`${item.sku || 'SKU pending'} / INVENTORY DETAIL`} title={`${item.brand} ${item.name}`} copy={`${item.size_label || 'Size not set'} · ${item.condition || 'Condition not set'} · added ${dateLabel(item.created_at)}`} action={<div className="seller-header-actions"><button type="button" className="seller-secondary compact seller-ai-button" onClick={analyzeItem} aria-disabled={!AI_ENABLED}>{analysisBusy ? 'ANALYZING…' : '✦ AI ANALYZE'}</button><a className="seller-secondary compact" href={`/seller/inventory/${id}/edit`} onClick={(event) => { event.preventDefault(); go(`/seller/inventory/${id}/edit`) }}>Edit item</a><span className={`inventory-status large ${item.status}`}>{titleCaseStatus(item.status)}</span></div>} />
-      {message && <Notice tone={message.startsWith('Sold recorded') ? 'success' : 'warning'}>{message}</Notice>}
-      {analysisMessage && <Notice tone="info">{analysisMessage}</Notice>}
-      <div className="detail-grid">
-        <section>
-          <div className="detail-hero"><img src={imageFor(item)} alt="" /><div><span>Purchase price</span><strong>{moneyIdr(item.purchase_price)}</strong><span>Suggested / minimum</span><b>{moneyIdr(item.suggested_price || item.price_idr)} / {moneyIdr(item.minimum_price)}</b></div></div>
-          <section className="seller-panel"><PanelTitle eyebrow="LISTING TRACKER" title="Marketplace status" />{item.status !== 'sold' ? <button className="seller-primary listing-entry-button" type="button" onClick={() => setShowListingGenerator(true)}>✦ Buat Listing <span>/ Generate Listings</span></button> : <Notice tone="warning">Barang sudah terjual. Periksa listing aktif di marketplace lain. AI tidak akan membuat listing baru untuk item sold.</Notice>}<div className="listing-stack">{MARKETPLACES.map((marketplace) => { const listing = listings.find((entry) => entry.marketplace === marketplace.key) || { marketplace: marketplace.key, listing_status: 'NOT_LISTED', listed_price: item.suggested_price || item.price_idr, listing_url: '' }; return <ListingRow key={marketplace.key} listing={listing} label={marketplace.label} onEdit={() => setEditingListing({ ...listing })} /> })}</div></section>
-        </section>
-        <aside className="detail-side">
-          <section className="seller-panel"><PanelTitle eyebrow="MASTER DATA" title="Item facts" /><dl className="seller-dl"><div><dt>Category</dt><dd>{item.category || '—'}</dd></div><div><dt>Source</dt><dd>{item.source || '—'}</dd></div><div><dt>Purchase date</dt><dd>{dateLabel(item.purchase_date)}</dd></div><div><dt>Defects</dt><dd>{item.defects || 'None noted'}</dd></div></dl>{item.source_url && <a className="seller-text-link" href={item.source_url} target="_blank" rel="noreferrer">Open source URL ↗</a>}</section>
-          {item.status !== 'sold' && <button className="seller-danger-button" type="button" onClick={() => setShowSold(true)}>MARK AS SOLD</button>}
-          {item.status === 'sold' && <section className="seller-panel"><PanelTitle eyebrow="SALE" title="Profit recorded" />{sales[0] ? <div className="profit-box"><span>Sold via {titleCaseStatus(sales[0].sold_via)}</span><strong>{moneyIdr(sales[0].sale_price)}</strong><p>Gross {moneyIdr(sales[0].gross_profit)} · Net {moneyIdr(sales[0].net_profit)}</p></div> : <p className="seller-muted">Sale details unavailable.</p>}</section>}
-        </aside>
+  if (!item) return message ? <div className="seller-empty"><strong>{message}</strong><button className="seller-secondary" onClick={() => go('/seller/inventory')}>← Kembali ke Barang</button></div> : <SellerLoading text="Memuat barang…" />
+  const isSold = String(item.status || '').toLowerCase() === 'sold'
+  const activeListings = productDetailActiveListings(listings, sales[0]?.sold_via)
+  const primaryAction = productDetailPrimaryAction(item, listings)
+  function runPrimaryAction() {
+    if (primaryAction.kind === 'complete') { go(`/seller/inventory/${id}/edit`); return }
+    if (primaryAction.kind === 'generator') { setActiveTab('marketplace'); setShowListingGenerator(true); return }
+    setActiveTab(primaryAction.target)
+  }
+  const primaryButton = primaryAction.kind === 'complete'
+    ? <a className="seller-primary product-primary-action" href={`/seller/inventory/${id}/edit`} onClick={(event) => { event.preventDefault(); runPrimaryAction() }}>{primaryAction.label}</a>
+    : <button type="button" className="seller-primary product-primary-action" onClick={runPrimaryAction}>{primaryAction.label}</button>
+
+  return <main className="product-workspace" aria-labelledby="product-workspace-title">
+    <header className="product-workspace-header">
+      <a className="product-back-link" href="/seller/inventory" onClick={(event) => { event.preventDefault(); go('/seller/inventory') }}>← Barang</a>
+      <div className="product-heading-row">
+        <div className="product-heading-copy"><span className="seller-kicker">BARANG / {item.sku || 'SKU pending'}</span><h1 id="product-workspace-title">{item.brand} {item.name}</h1><p>{[item.size_label, item.condition, item.category].filter(Boolean).join(' · ') || 'Detail barang'}</p></div>
+        <span className={`inventory-status large ${String(item.status || '').toLowerCase()}`}>{titleCaseStatus(item.status)}</span>
       </div>
-      {item.status === 'sold' && activeListings.length > 0 && <Notice tone="warning">⚠ This item is still listed on: {activeListings.map((listing) => titleCaseStatus(listing.marketplace)).join(', ')}. Remove or update those listings manually.</Notice>}
-      {showListingGenerator && <ListingGenerator item={item} listings={listings} onClose={() => setShowListingGenerator(false)} onSaved={load} />}
-      {editingListing && <div className="seller-modal-bg"><form className="seller-modal listing-edit-modal" onSubmit={saveListing}><div className="modal-head"><h2>{titleCaseStatus(editingListing.marketplace)} listing</h2><button type="button" onClick={() => setEditingListing(null)}>×</button></div><label>Status<select value={editingListing.listing_status} onChange={(event) => setEditingListing({ ...editingListing, listing_status: event.target.value })}>{LISTING_STATUSES.map((status) => <option key={status} value={status}>{titleCaseStatus(status)}</option>)}</select></label><label>Harga listing<input type="number" value={editingListing.listed_price || ''} onChange={(event) => setEditingListing({ ...editingListing, listed_price: event.target.value })} /></label><label>URL listing<input value={editingListing.listing_url || ''} onChange={(event) => setEditingListing({ ...editingListing, listing_url: event.target.value })} placeholder="https://…" /></label><div className="seller-form-actions"><button className="seller-primary">Simpan</button><button type="button" className="seller-secondary" onClick={() => setEditingListing(null)}>Batal</button></div></form></div>}
-      {analysis && <ItemAnalysisReview analysis={analysis} selected={selectedSuggestions} onSelect={setSelectedSuggestions} onApply={applyAnalysis} onRetry={analyzeItem} onCancel={() => setAnalysis(null)} busy={analysisBusy} />}
-      {showSold && <div className="seller-modal-bg"><form className="seller-modal" onSubmit={markSold}><div className="modal-head"><h2>Mark as sold</h2><button type="button" onClick={() => setShowSold(false)}>×</button></div><p className="seller-muted">This updates master inventory and records the sale. External marketplace posts are not changed.</p><label>Sold via<select name="sold_via" defaultValue="HAQLOOKS">{MARKETPLACES.map((marketplace) => <option key={marketplace.key} value={marketplace.key}>{marketplace.label}</option>)}<option value="OTHER">Other</option></select></label><Field label="Sale price" name="sale_price" type="number" placeholder="2250000" required /><div className="seller-fields two"><Field label="Marketplace fee" name="marketplace_fee" type="number" placeholder="0" /><Field label="Payment fee" name="payment_fee" type="number" placeholder="0" /><Field label="Shipping subsidy" name="shipping_subsidy" type="number" placeholder="0" /><Field label="Other cost" name="other_cost" type="number" placeholder="0" /></div><label>Notes<textarea name="notes" rows="3" placeholder="Optional sale note" /></label><div className="seller-form-actions"><button className="seller-danger-button">Confirm sold</button><button type="button" className="seller-secondary" onClick={() => setShowSold(false)}>Cancel</button></div></form></div>}
+      <div className="product-action-bar">{primaryButton}<button type="button" className="seller-secondary product-secondary-action" onClick={analyzeItem} aria-disabled={!AI_ENABLED}>{analysisBusy ? 'Sedang menganalisis…' : '✦ Cek dengan AI'}</button></div>
+    </header>
+
+    {message && <Notice tone={message.startsWith('Sold recorded') ? 'success' : 'warning'}>{message}</Notice>}
+    {analysisMessage && <Notice tone="info">{analysisMessage}</Notice>}
+    {isSold && activeListings.length > 0 && <Notice tone="warning">Barang ini sudah terjual. Periksa listing marketplace berikut secara manual: {activeListings.map((listing) => marketplaceStatusLabel(listing.marketplace)).join(', ')}. Listing tidak dihapus otomatis.</Notice>}
+
+    <div className="product-detail-tabs" role="tablist" aria-label="Bagian detail barang">
+      {PRODUCT_DETAIL_TABS.map((tab) => <button key={tab.id} ref={(element) => { tabRefs.current[tab.id] = element }} type="button" role="tab" id={`product-tab-${tab.id}`} aria-controls={`product-panel-${tab.id}`} aria-selected={activeTab === tab.id} tabIndex={activeTab === tab.id ? 0 : -1} className={activeTab === tab.id ? 'active' : ''} onClick={() => setActiveTab(tab.id)} onKeyDown={(event) => handleTabKeyDown(event, tab.id)}>{tab.label}</button>)}
     </div>
-  )
+    <section className="product-tab-panel" id={`product-panel-${activeTab}`} role="tabpanel" aria-labelledby={`product-tab-${activeTab}`} tabIndex={0}>
+      {activeTab === 'summary' && <ProductSummaryTab item={item} analysis={lastAnalysis} analysisApplied={analysisApplied} onEdit={() => go(`/seller/inventory/${id}/edit`)} onReviewAnalysis={() => setAnalysis(lastAnalysis)} />}
+      {activeTab === 'marketplace' && <ProductMarketplaceTab item={item} listings={listings} onGenerate={() => setShowListingGenerator(true)} onEdit={(listing) => setEditingListing({ ...listing })} />}
+      {activeTab === 'sales' && <ProductSalesTab item={item} sale={sales[0]} onMarkSold={() => setShowSold(true)} />}
+    </section>
+
+    {showListingGenerator && <ListingGenerator item={item} listings={listings} onClose={() => setShowListingGenerator(false)} onSaved={load} />}
+    {editingListing && <div className="seller-modal-bg product-workspace-modal-bg"><form className="seller-modal listing-edit-modal product-workspace-modal" onSubmit={saveListing}><div className="modal-head"><h2>{marketplaceStatusLabel(editingListing.marketplace)} · listing</h2><button type="button" aria-label="Tutup edit listing" onClick={() => setEditingListing(null)}>×</button></div><label>Status<select value={editingListing.listing_status} onChange={(event) => setEditingListing({ ...editingListing, listing_status: event.target.value })}>{LISTING_STATUSES.map((status) => <option key={status} value={status}>{marketplaceStatusLabel(status)}</option>)}</select></label><label>Harga listing<input type="number" value={editingListing.listed_price || ''} onChange={(event) => setEditingListing({ ...editingListing, listed_price: event.target.value })} /></label><label>URL listing<input value={editingListing.listing_url || ''} onChange={(event) => setEditingListing({ ...editingListing, listing_url: event.target.value })} placeholder="https://…" /></label><div className="seller-form-actions"><button className="seller-primary">Simpan</button><button type="button" className="seller-secondary" onClick={() => setEditingListing(null)}>Batal</button></div></form></div>}
+    {analysis && <ItemAnalysisReview analysis={analysis} selected={selectedSuggestions} onSelect={setSelectedSuggestions} onApply={applyAnalysis} onRetry={analyzeItem} onCancel={() => setAnalysis(null)} busy={analysisBusy} />}
+    {showSold && <div className="seller-modal-bg product-workspace-modal-bg"><form className="seller-modal product-workspace-modal product-sale-modal" onSubmit={markSold}><div className="modal-head"><h2>Catat terjual</h2><button type="button" aria-label="Tutup pencatatan penjualan" onClick={() => setShowSold(false)}>×</button></div><p className="seller-muted">Status barang dan catatan penjualan diperbarui. Listing eksternal tidak akan diubah otomatis.</p><label>Terjual melalui<select name="sold_via" defaultValue="HAQLOOKS">{MARKETPLACES.map((marketplace) => <option key={marketplace.key} value={marketplace.key}>{marketplace.label}</option>)}<option value="OTHER">Lainnya</option></select></label><Field label="Harga jual" name="sale_price" type="number" placeholder="2250000" required /><div className="seller-fields two"><Field label="Biaya marketplace" name="marketplace_fee" type="number" placeholder="0" /><Field label="Biaya pembayaran" name="payment_fee" type="number" placeholder="0" /><Field label="Subsidi ongkir" name="shipping_subsidy" type="number" placeholder="0" /><Field label="Biaya lain" name="other_cost" type="number" placeholder="0" /></div><label>Catatan<textarea name="notes" rows="3" placeholder="Catatan penjualan (opsional)" /></label><div className="seller-form-actions"><button className="seller-danger-button">Simpan penjualan</button><button type="button" className="seller-secondary" onClick={() => setShowSold(false)}>Batal</button></div></form></div>}
+  </main>
+}
+
+function ProductSummaryTab({ item, analysis, analysisApplied, onEdit, onReviewAnalysis }) {
+  const result = analysis?.result || {}
+  const conditionSummary = analysisBilingualValue(result, 'condition_summary').id
+  const aiTitle = analysisBilingualValue(result, 'suggested_title').id
+  const aiBrand = analysisBilingualValue(result, 'detected_brand').id
+  const aiDefects = analysisBilingualValue(result, 'visible_defects').id
+  return <div className="product-summary-grid">
+    <section className="seller-panel product-item-panel">
+      <div className="product-photo-frame"><img src={imageFor(item)} alt={`${item.brand || ''} ${item.name || 'Foto barang'}`} /></div>
+      <div className="product-item-content">
+        <div className="product-facts-grid"><ProductDetailFact label="Merek" value={item.brand} /><ProductDetailFact label="Kategori" value={item.category} /><ProductDetailFact label="Ukuran" value={item.size_label} /><ProductDetailFact label="Kondisi" value={item.condition} />{item.color && <ProductDetailFact label="Warna" value={item.color} />}{item.material && <ProductDetailFact label="Material" value={item.material} />}</div>
+        <div className="product-money-grid"><ProductDetailFact label="Modal" value={moneyIdr(item.purchase_price)} /><ProductDetailFact label="Harga target" value={moneyIdr(item.suggested_price || item.price_idr)} /><ProductDetailFact label="Harga minimum" value={moneyIdr(item.minimum_price)} /></div>
+        <div className="product-source-line"><span>Dibeli {dateLabel(item.purchase_date)}</span>{item.source && <span>Sumber: {item.source}</span>}{item.source_url && safeHttpUrl(item.source_url) && <a href={safeHttpUrl(item.source_url)} target="_blank" rel="noreferrer">Buka sumber ↗</a>}</div>
+        <button type="button" className="seller-secondary product-edit-link" onClick={onEdit}>Edit barang</button>
+      </div>
+    </section>
+    <div className="product-summary-side">
+      <section className="seller-panel product-notes-panel"><PanelTitle eyebrow="KONDISI" title="Kondisi & catatan" />
+        <ProductNote label="Catatan kondisi" value={item.condition_notes} />
+        <ProductNote label="Kekurangan / defect" value={item.defects} />
+        <ProductNote label="Catatan seller" value={item.description} />
+        {!item.condition_notes && !item.defects && !item.description && <p className="seller-muted">Belum ada catatan kondisi atau defect.</p>}
+      </section>
+      <section className="seller-panel product-ai-summary"><PanelTitle eyebrow="ANALISIS BARANG" title="Cek dengan AI" />
+        <span className={`product-ai-state ${analysis ? 'complete' : 'empty'}`}>{analysis ? (analysisApplied ? 'Saran terakhir sudah diterapkan' : 'Analisis tersedia untuk ditinjau') : 'Belum dianalisis di sesi ini'}</span>
+        {analysis && <><div className="product-ai-highlights">{aiBrand && <p><span>Merek</span><strong>{aiBrand}</strong></p>}{aiTitle && <p><span>Judul</span><strong>{aiTitle}</strong></p>}{conditionSummary && <p><span>Kondisi</span><strong>{conditionSummary}</strong></p>}{aiDefects && <p><span>Defect terlihat</span><strong>{aiDefects}</strong></p>}</div><p className="product-authenticity-note">{result.authenticity_note || 'Keaslian belum diverifikasi. Perlu pemeriksaan manual.'}</p>{!analysisApplied && <button type="button" className="seller-secondary product-review-ai" onClick={onReviewAnalysis}>Tinjau saran AI</button>}</>}
+        {!analysis && <p className="seller-muted">AI hanya berjalan saat tombol “Cek dengan AI” ditekan. Membuka atau mengganti tab tidak memanggil AI.</p>}
+      </section>
+    </div>
+  </div>
+}
+
+function ProductDetailFact({ label, value }) { return <div className="product-detail-fact"><span>{label}</span><strong>{value || '—'}</strong></div> }
+
+function ProductNote({ label, value }) {
+  const [expanded, setExpanded] = useState(false)
+  if (!value) return null
+  const text = String(value)
+  return <div className="product-note-block"><span>{label}</span><p className={expanded ? 'expanded' : ''}>{text}</p>{text.length > 140 && <button type="button" onClick={() => setExpanded((current) => !current)} aria-expanded={expanded}>{expanded ? 'Tampilkan lebih sedikit' : 'Lihat catatan lengkap'}</button>}</div>
+}
+
+function ProductMarketplaceTab({ item, listings, onGenerate, onEdit }) {
+  const isSold = String(item.status || '').toLowerCase() === 'sold'
+  return <div className="product-marketplace-workspace">
+    <section className="seller-panel product-marketplace-intro"><div><span className="seller-kicker">DISTRIBUSI PER BARANG</span><h2>Marketplace</h2><p>Kelola status untuk barang ini. Posting dan penghapusan listing tetap manual.</p></div>{!isSold && <button className="seller-primary product-generator-action" type="button" onClick={onGenerate}>✦ Buat listing</button>}</section>
+    {isSold && <Notice tone="warning">Barang ini sudah terjual. Jangan buat listing baru; periksa dan perbarui listing yang masih tayang secara manual.</Notice>}
+    <div className="product-marketplace-grid">{MARKETPLACES.map((marketplace) => {
+      const listing = listings.find((entry) => entry.marketplace === marketplace.key) || { marketplace: marketplace.key, listing_status: 'NOT_LISTED', listed_price: 0, listing_url: '' }
+      const safeUrl = safeHttpUrl(listing.listing_url)
+      return <article className="product-marketplace-card" key={marketplace.key}>
+        <div className="product-marketplace-card-head"><div><span className="seller-kicker">KANAL</span><h3>{marketplace.label}</h3></div><span className={`product-marketplace-status ${String(listing.listing_status).toLowerCase()}`}><i aria-hidden="true" />{marketplaceStatusLabel(listing.listing_status)}</span></div>
+        <div className="product-marketplace-price"><span>Harga listing</span><strong>{Number(listing.listed_price || 0) > 0 ? moneyIdr(listing.listed_price) : 'Belum diatur'}</strong></div>
+        <p className={`product-marketplace-copy-state ${listing.listing_title || listing.listing_description ? 'available' : ''}`} aria-label="Status copy listing">{listing.listing_title || listing.listing_description ? 'Copy listing tersedia' : 'Belum ada copy tersimpan'}</p>
+        <p className="product-marketplace-updated">{listing.last_updated ? `Diperbarui ${dateLabel(listing.last_updated)}` : 'Belum ada aktivitas listing'}</p>
+        <div className="product-marketplace-actions">{safeUrl ? <a className="seller-secondary" href={safeUrl} target="_blank" rel="noreferrer">Buka listing ↗</a> : <span className="product-marketplace-no-url">{listing.listing_status === 'NOT_LISTED' ? 'Belum ada URL listing' : 'URL belum dicatat'}</span>}<button type="button" className="seller-secondary" onClick={() => onEdit(listing)}>Edit</button></div>
+      </article>
+    })}</div>
+  </div>
+}
+
+function ProductSalesTab({ item, sale, onMarkSold }) {
+  const isSold = String(item.status || '').toLowerCase() === 'sold'
+  return <div className="product-sales-workspace">
+    {!isSold ? <section className="seller-panel product-unsold-state"><span className="product-sale-state-label">BELUM TERJUAL</span><h2>Barang masih tersedia</h2><p>Catat penjualan setelah transaksi selesai. Perhitungan laba menggunakan modal barang dan biaya yang dicatat.</p><div className="product-sale-baseline"><ProductDetailFact label="Modal barang" value={moneyIdr(item.purchase_price)} /><ProductDetailFact label="Harga target" value={moneyIdr(item.suggested_price || item.price_idr)} /></div><button type="button" className="seller-danger-button product-record-sale" onClick={onMarkSold}>Catat terjual</button></section>
+      : <section className="seller-panel product-sold-state"><div className="product-sold-heading"><span className="product-sale-state-label">TERJUAL</span><h2>Ringkasan penjualan</h2></div>{sale ? <><div className="product-sale-meta"><span>Melalui {marketplaceStatusLabel(sale.sold_via)}</span><span>{dateLabel(sale.sold_at)}</span></div><div className="product-sale-metrics"><ProductDetailFact label="Harga jual" value={moneyIdr(sale.sale_price)} /><ProductDetailFact label="Modal" value={moneyIdr(sale.purchase_price ?? item.purchase_price)} /><ProductDetailFact label="Laba kotor" value={moneyIdr(sale.gross_profit)} /><ProductDetailFact label="Laba bersih" value={moneyIdr(sale.net_profit)} /><ProductDetailFact label="Biaya marketplace" value={moneyIdr(sale.marketplace_fee)} /><ProductDetailFact label="Biaya pembayaran" value={moneyIdr(sale.payment_fee)} /><ProductDetailFact label="Subsidi ongkir" value={moneyIdr(sale.shipping_subsidy)} /><ProductDetailFact label="Biaya lain" value={moneyIdr(sale.other_cost)} /></div>{sale.notes && <ProductNote label="Catatan penjualan" value={sale.notes} />}</> : <p className="seller-muted">Barang berstatus terjual, tetapi detail transaksinya tidak tersedia.</p>}</section>}
+  </div>
 }
 
 function ItemAnalysisReview({ analysis, selected, onSelect, onApply, onRetry, onCancel, busy }) {
