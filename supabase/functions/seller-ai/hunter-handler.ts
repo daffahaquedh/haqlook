@@ -1,7 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { DEFAULT_MODEL, estimateHunterCostIdr, hunterReservationCostIdr } from './pricing.ts'
-import { createHunterBriefRequest, createHunterChatRequest, createHunterItemCheckRequest } from './hunter-analysis.ts'
-import { countWebSearchCalls, extractHunterCitations, findHunterTarget, responsesOutputText, sanitizeHunterBrief, summarizeHaqlooksData } from './hunter-utils.ts'
+import { createHunterBriefRequest, createHunterChatRequest, createHunterItemCheckRequest, HUNTER_OPENAI_TIMEOUT_MS } from './hunter-analysis.ts'
+import { countWebSearchCalls, extractHunterCitations, findHunterTarget, hunterResponseMetrics, parseCompletedHunterJson, responsesOutputText, sanitizeHunterBrief, summarizeHaqlooksData } from './hunter-utils.ts'
 
 type AnyClient = ReturnType<typeof createClient>
 type HunterUser = { id: string; email?: string | null }
@@ -66,7 +66,8 @@ function outputUsage(payload: Record<string, unknown>) {
   const usage = payload.usage && typeof payload.usage === 'object' ? payload.usage as Record<string, unknown> : {}
   const inputDetails = usage.input_tokens_details && typeof usage.input_tokens_details === 'object' ? usage.input_tokens_details as Record<string, unknown> : {}
   const finite = (value: unknown) => Number.isFinite(Number(value)) ? Math.max(0, Math.floor(Number(value))) : 0
-  return { input: finite(usage.input_tokens), cachedInput: finite(inputDetails.cached_tokens), output: finite(usage.output_tokens) }
+  const outputDetails = usage.output_tokens_details && typeof usage.output_tokens_details === 'object' ? usage.output_tokens_details as Record<string, unknown> : {}
+  return { input: finite(usage.input_tokens), cachedInput: finite(inputDetails.cached_tokens), output: finite(usage.output_tokens), reasoning: finite(outputDetails.reasoning_tokens) }
 }
 
 function openAiErrorMessage(status: number) {
@@ -89,7 +90,8 @@ function serverClient(supabaseUrl: string) {
 
 async function fetchOpenAi(requestBody: Record<string, unknown>, openAiKey: string) {
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 70_000)
+  // Supabase hosted Edge Functions have a 150s idle timeout; retain ~40s for usage finalization/cache writes.
+  const timeout = setTimeout(() => controller.abort(), HUNTER_OPENAI_TIMEOUT_MS)
   try {
     const response = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
@@ -150,6 +152,7 @@ async function releaseUsage(client: AnyClient, id: string) {
 async function finalizeUsage(client: AnyClient, id: string, feature: string, payload: Record<string, unknown>, details: Record<string, unknown>) {
   const tokens = outputUsage(payload)
   const searches = countWebSearchCalls(payload)
+  const metrics = hunterResponseMetrics(payload)
   const cost = estimateHunterCostIdr(DEFAULT_MODEL, tokens.input, tokens.output, tokens.cachedInput, searches)
   const { error } = await client.rpc('finalize_hunter_ai_usage', {
     p_usage_id: id,
@@ -158,10 +161,11 @@ async function finalizeUsage(client: AnyClient, id: string, feature: string, pay
     p_tool_cost: cost.toolCostIdr,
     p_total_cost: cost.totalCostIdr,
     p_search_calls: searches,
-    p_details: { ...details, feature, search_calls: searches },
+    p_details: { ...details, feature, ...metrics, search_calls: searches },
   })
   if (error) throw new Error('AI_USAGE_FINALIZE_FAILED')
-  return { input_tokens: tokens.input, output_tokens: tokens.output, search_calls: searches, tool_cost_idr: cost.toolCostIdr, estimated_cost_idr: cost.totalCostIdr }
+  console.info('hunter_ai_response', JSON.stringify(metrics))
+  return { ...metrics, tool_cost_idr: cost.toolCostIdr, estimated_cost_idr: cost.totalCostIdr }
 }
 
 async function getInternalSummary(client: AnyClient) {
@@ -190,6 +194,7 @@ async function handleResearch(input: HandlerInput, client: AnyClient, admin: Any
     if (cached) {
       const summary = `${cached.brief_json?.destination_name || destination} için ${Object.values(cached.brief_json?.sections || {}).flat().length} sourcing target siap. Sumber terverifikasi tersedia di bawah; stok fisik hari ini tidak dapat dipastikan.`
       await updateSession(client, String(session.id), { destination })
+      await saveMessage(client, input.user, String(session.id), 'user', message, 'chat', {})
       await saveMessage(client, input.user, String(session.id), 'assistant', summary, 'brief', { brief_id: cached.id, cache_hit: true })
       return jsonResponse({ ok: true, feature: 'HUNTER_DESTINATION_BRIEF', session_id: session.id, destination, assistant_message: summary, brief_id: cached.id, cached: true, brief: { id: cached.id, destination: cached.destination, brief: cached.brief_json, citations: cached.citations || [], created_at: cached.created_at, expires_at: cached.expires_at } }, 200, input.corsHeaders)
     }
@@ -206,9 +211,15 @@ async function handleResearch(input: HandlerInput, client: AnyClient, admin: Any
     const payload = await fetchOpenAi(createHunterBriefRequest({ destination, destinationType: destinationTypeFor(destination), previousSession: conversation.slice(-6), internalSummary, now }), input.openAiKey)
     providerResponded = true
     let parsed: unknown
-    try { parsed = parseJsonOutput(payload) } catch {
-      await finalizeUsage(client, usageId, usageFeature, payload, { destination, category: 'all', cache_key: key, cache_hit: false, invalid_response: true })
-      return failure('AI_INVALID_RESPONSE', 'Research did not return a valid structured brief. Try refresh again.', 502, input.corsHeaders)
+    try { parsed = parseCompletedHunterJson(payload) } catch (error) {
+      const code = String((error as Record<string, unknown>)?.code || 'AI_INVALID_RESPONSE')
+      await finalizeUsage(client, usageId, usageFeature, payload, { destination, category: 'all', cache_key: key, cache_hit: false, invalid_response: true, invalid_response_code: code })
+      const messages: Record<string, string> = {
+        AI_OUTPUT_LIMIT: 'Riset mencapai batas panjang respons sebelum brief selesai. Silakan coba refresh; inventory dan brief tersimpan tetap aman.',
+        AI_CONTENT_FILTERED: 'Riset tidak dapat ditampilkan karena pemeriksaan keamanan provider. Coba tujuan atau permintaan yang lebih spesifik.',
+        AI_REFUSED: 'Provider AI menolak permintaan riset ini. Coba tujuan atau permintaan yang lebih spesifik.',
+      }
+      return failure(code, messages[code] || 'Research did not return a valid structured brief. Try refresh again.', 502, input.corsHeaders)
     }
     const citations = extractHunterCitations(payload)
     const brief = sanitizeHunterBrief(parsed as Record<string, unknown>, citations)
@@ -222,6 +233,7 @@ async function handleResearch(input: HandlerInput, client: AnyClient, admin: Any
     const targetCount = Object.values(brief.sections).flat().length
     const assistantMessage = `${destination} için ${targetCount} hedefli hunting brief hazır. Riset diperbarui ${new Intl.DateTimeFormat('id-ID', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Jakarta' }).format(new Date(createdAt))}. Harga hanya ditampilkan jika ada sumber publik; ketersediaan barang hari ini tidak dapat dipastikan.`
     await updateSession(client, String(session.id), { destination })
+    await saveMessage(client, input.user, String(session.id), 'user', message, 'chat', {})
     await saveMessage(client, input.user, String(session.id), 'assistant', assistantMessage, 'brief', { brief_id: stored.id, cache_hit: false })
     return jsonResponse({ ok: true, feature: usageFeature, model: DEFAULT_MODEL, reasoning_effort: 'medium', session_id: session.id, destination, assistant_message: assistantMessage, brief_id: stored.id, cached: false, brief: { id: stored.id, destination: stored.destination, brief: stored.brief_json, citations: stored.citations, created_at: stored.created_at, expires_at: stored.expires_at }, usage: tokenUsage }, 200, input.corsHeaders)
   } catch (error) {
@@ -350,13 +362,13 @@ export async function handleHunterRequest(input: HandlerInput) {
   try { session = await getOrCreateSession(input.supabase, input.user, input.body.session_id) } catch { return failure('HUNTER_SESSION_UNAVAILABLE', 'The Hunter session could not be loaded. Refresh Seller Panel and retry.', 403, input.corsHeaders) }
   const message = redactChatText(input.body.message)
   const isItemCheck = feature === 'HUNTER_ITEM_CHECK'
-  const safeUserMessage = isItemCheck ? `Photo check: ${String(input.body.target?.item_name || 'item').slice(0, 100)} · asking price ${idrValue(input.body.asking_price_idr) || 'not set'} IDR.` : message
-  try { await saveMessage(input.supabase, input.user, String(session.id), 'user', safeUserMessage, isItemCheck ? 'item_check' : 'chat', {}) } catch { return failure('HUNTER_MESSAGE_SAVE_FAILED', 'Message could not be saved to this session.', 500, input.corsHeaders) }
-
   const destination = safeDestination(input.body.destination || searchDestination(message) || session.destination)
   if (destination && destination !== String(session.destination || '')) await updateSession(input.supabase, String(session.id), { destination })
   if (feature === 'HUNTER_DESTINATION_BRIEF' || feature === 'HUNTER_REFRESH') return handleResearch(input, input.supabase, admin, session, feature, message)
+  const safeUserMessage = isItemCheck ? `Photo check: ${String(input.body.target?.item_name || 'item').slice(0, 100)} · asking price ${idrValue(input.body.asking_price_idr) || 'not set'} IDR.` : message
+  try { await saveMessage(input.supabase, input.user, String(session.id), 'user', safeUserMessage, isItemCheck ? 'item_check' : 'chat', {}) } catch { return failure('HUNTER_MESSAGE_SAVE_FAILED', 'Message could not be saved to this session.', 500, input.corsHeaders) }
   if (feature === 'HUNTER_ITEM_CHECK') return handleItemCheck(input, input.supabase, admin, session, message)
   return handleChat(input, input.supabase, admin, session, message)
 }
+
 

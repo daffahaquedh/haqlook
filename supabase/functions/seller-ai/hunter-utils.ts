@@ -9,6 +9,70 @@ export function responsesOutputText(payload: Record<string, unknown>) {
   return ''
 }
 
+function hunterError(code: string) {
+  return Object.assign(new Error(code), { code })
+}
+
+function isContentFiltered(payload: Record<string, unknown>) {
+  const error = payload.error && typeof payload.error === 'object' ? payload.error as Record<string, unknown> : {}
+  const incomplete = payload.incomplete_details && typeof payload.incomplete_details === 'object' ? payload.incomplete_details as Record<string, unknown> : {}
+  const code = String(error.code || '')
+  return String(incomplete.reason || '') === 'content_filter' || /content.?filter|safety/i.test(code)
+}
+
+function containsRefusal(payload: Record<string, unknown>) {
+  return (Array.isArray(payload.output) ? payload.output : []).some((item) => {
+    if (!item || typeof item !== 'object') return false
+    const row = item as Record<string, unknown>
+    if (row.type === 'refusal') return true
+    return (Array.isArray(row.content) ? row.content : []).some((part) => part && typeof part === 'object' && (part as Record<string, unknown>).type === 'refusal')
+  })
+}
+
+/** Only parse Structured Output after Responses confirms a completed final message. */
+export function parseCompletedHunterJson(payload: Record<string, unknown>) {
+  if (isContentFiltered(payload)) throw hunterError('AI_CONTENT_FILTERED')
+  if (containsRefusal(payload)) throw hunterError('AI_REFUSED')
+
+  const status = String(payload.status || '')
+  const incomplete = payload.incomplete_details && typeof payload.incomplete_details === 'object' ? payload.incomplete_details as Record<string, unknown> : {}
+  const reason = String(incomplete.reason || '')
+  if (status === 'incomplete' && reason === 'max_output_tokens') throw hunterError('AI_OUTPUT_LIMIT')
+  if (status === 'incomplete') throw hunterError('AI_RESPONSE_INCOMPLETE')
+  if (status !== 'completed') throw hunterError('AI_RESPONSE_NOT_COMPLETED')
+
+  let text = typeof payload.output_text === 'string' ? payload.output_text : ''
+  if (!text) {
+    for (const item of Array.isArray(payload.output) ? payload.output : []) {
+      if (!item || typeof item !== 'object') continue
+      const row = item as Record<string, unknown>
+      if (row.type !== 'message' || (row.role && row.role !== 'assistant') || (row.status && row.status !== 'completed')) continue
+      const finalPart = (Array.isArray(row.content) ? row.content : []).find((part) => part && typeof part === 'object' && (part as Record<string, unknown>).type === 'output_text') as Record<string, unknown> | undefined
+      if (typeof finalPart?.text === 'string') { text = finalPart.text; break }
+    }
+  }
+  if (!text) throw hunterError('AI_EMPTY_RESPONSE')
+  try { return JSON.parse(text) } catch { throw hunterError('AI_INVALID_RESPONSE') }
+}
+
+/** Safe metrics only: no prompt, response text, destination, or account identifiers. */
+export function hunterResponseMetrics(payload: Record<string, unknown>) {
+  const usage = payload.usage && typeof payload.usage === 'object' ? payload.usage as Record<string, unknown> : {}
+  const inputDetails = usage.input_tokens_details && typeof usage.input_tokens_details === 'object' ? usage.input_tokens_details as Record<string, unknown> : {}
+  const outputDetails = usage.output_tokens_details && typeof usage.output_tokens_details === 'object' ? usage.output_tokens_details as Record<string, unknown> : {}
+  const finite = (value: unknown) => Number.isFinite(Number(value)) ? Math.max(0, Math.floor(Number(value))) : 0
+  const incomplete = payload.incomplete_details && typeof payload.incomplete_details === 'object' ? payload.incomplete_details as Record<string, unknown> : {}
+  return {
+    response_status: String(payload.status || 'unknown'),
+    incomplete_reason: String(incomplete.reason || ''),
+    input_tokens: finite(usage.input_tokens),
+    cached_input_tokens: finite(inputDetails.cached_tokens),
+    output_tokens: finite(usage.output_tokens),
+    reasoning_tokens: finite(outputDetails.reasoning_tokens),
+    web_search_calls: countWebSearchCalls(payload),
+  }
+}
+
 export function extractHunterCitations(payload: Record<string, unknown>) {
   const citations = new Map<string, { url: string; title: string }>()
   for (const item of Array.isArray(payload.output) ? payload.output : []) {
@@ -179,4 +243,5 @@ export function findHunterTarget(brief: Record<string, unknown>, targetId: strin
   }
   return null
 }
+
 

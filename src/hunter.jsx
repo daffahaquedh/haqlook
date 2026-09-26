@@ -9,12 +9,16 @@ const OPENING = 'Hari ini mau hunting ke mana?'
 
 function errorMessage(error, fallback = 'Belum berhasil. Coba lagi sebentar.') {
   const raw = String(error?.message || error || '')
-  if (/AI_MONTHLY_BUDGET_REACHED|budget/i.test(raw)) return 'Budget AI bulanan sudah tercapai. Inventory dan sourcing manual tetap bisa dipakai.'
-  if (/AI_NOT_CONFIGURED/i.test(raw)) return 'AI belum dikonfigurasi di server. Sourcing manual tetap tersedia.'
-  if (/AI_TIMEOUT|timed out|timeout/i.test(raw)) return 'Permintaan AI terlalu lama. Brief tersimpan tetap bisa dipakai; coba lagi sebentar.'
-  if (/AI_RATE_LIMITED|rate limit/i.test(raw)) return 'AI sedang menerima terlalu banyak permintaan. Coba lagi sebentar.'
-  if (/AI_INVALID_RESPONSE/i.test(raw)) return 'Jawaban AI belum terbaca dengan benar. Coba ulangi tanpa mengubah data inventory.'
-  if (/IMAGE_UNAVAILABLE/i.test(raw)) return 'Foto tidak bisa dianalisis. Pilih JPEG, PNG, atau WebP lain.'
+  const signal = `${String(error?.code || '')} ${raw}`
+  if (/AI_MONTHLY_BUDGET_REACHED|budget/i.test(signal)) return 'Budget AI bulanan sudah tercapai. Inventory dan sourcing manual tetap bisa dipakai.'
+  if (/AI_NOT_CONFIGURED/i.test(signal)) return 'AI belum dikonfigurasi di server. Sourcing manual tetap tersedia.'
+  if (/AI_TIMEOUT|timed out|timeout/i.test(signal)) return 'Permintaan AI terlalu lama. Brief tersimpan tetap bisa dipakai; coba lagi sebentar.'
+  if (/AI_RATE_LIMITED|rate limit/i.test(signal)) return 'AI sedang menerima terlalu banyak permintaan. Coba lagi sebentar.'
+  if (/AI_OUTPUT_LIMIT/i.test(signal)) return 'Riset terlalu panjang dan belum selesai. Coba refresh lagi; brief tersimpan dan inventory tetap aman.'
+  if (/AI_CONTENT_FILTERED/i.test(signal)) return 'Riset tertahan oleh pemeriksaan keamanan AI. Coba tujuan atau permintaan yang lebih spesifik.'
+  if (/AI_REFUSED/i.test(signal)) return 'AI tidak dapat menyelesaikan permintaan riset ini. Coba permintaan yang lebih spesifik.'
+  if (/AI_INVALID_RESPONSE/i.test(signal)) return 'Jawaban AI belum terbaca dengan benar. Coba ulangi tanpa mengubah data inventory.'
+  if (/IMAGE_UNAVAILABLE/i.test(signal)) return 'Foto tidak bisa dianalisis. Pilih JPEG, PNG, atau WebP lain.'
   return raw || fallback
 }
 
@@ -27,9 +31,9 @@ async function callHunterFunction(body) {
       const payload = await (typeof response?.clone === 'function' ? response.clone() : response).json()
       message = payload?.message || payload?.error || message
     } catch { /* Keep the SDK error if there is no readable response body. */ }
-    throw new Error(message || 'Hunter request failed.')
+    throw Object.assign(new Error(message || 'Hunter request failed.'), { code: payload?.error })
   }
-  if (!data?.ok) throw new Error(data?.message || data?.error || 'AI Hunter request failed.')
+  if (!data?.ok) throw Object.assign(new Error(data?.message || data?.error || 'AI Hunter request failed.'), { code: data?.error })
   return data
 }
 
@@ -189,7 +193,8 @@ export function HunterChatPage() {
     await updateSession({ ...(detected ? { destination: detected } : {}), ...(budget ? { budget_idr: budget } : {}), ...(categories.length ? { category_focus: categories } : {}) })
     const currentBriefDestination = brief?.destination || brief?.brief?.destination_name || ''
     const feature = forceRefresh ? 'HUNTER_REFRESH' : nextDestination && (!brief || currentBriefDestination.toLowerCase() !== nextDestination.toLowerCase()) ? 'HUNTER_DESTINATION_BRIEF' : 'HUNTER_CHAT'
-    setMessages((current) => [...current, { id: `local-user-${Date.now()}`, role: 'user', content: trimmed, message_kind: 'chat', created_at: new Date().toISOString() }])
+    const optimisticMessageId = `local-user-${Date.now()}`
+    setMessages((current) => [...current, { id: optimisticMessageId, role: 'user', content: trimmed, message_kind: 'chat', created_at: new Date().toISOString() }])
     setLoading(true); setLoadingLabel(feature === 'HUNTER_CHAT' ? 'Menyiapkan jawaban dari brief yang sudah ada…' : 'Mencari referensi publik terbaru…')
     try {
       const data = await callHunterFunction({
@@ -209,7 +214,10 @@ export function HunterChatPage() {
       if (Array.isArray(data.focused_target_ids)) setFocusedTargetIds(data.focused_target_ids)
       setMessages((current) => [...current, { id: `local-assistant-${Date.now()}`, role: 'assistant', content: data.assistant_message || data.reply || 'Selesai.', message_kind: data.brief ? 'brief' : 'chat', metadata: data.brief_id ? { brief_id: data.brief_id } : {}, created_at: new Date().toISOString() }])
       if (data.session_id) setSessions((current) => current.map((session) => session.id === data.session_id ? { ...session, updated_at: new Date().toISOString(), destination: data.destination || session.destination } : session))
-    } catch (caught) { setError(errorMessage(caught, 'AI Hunter sedang tidak tersedia.')); }
+    } catch (caught) {
+      if (feature === 'HUNTER_DESTINATION_BRIEF' || feature === 'HUNTER_REFRESH') setMessages((current) => current.filter((item) => item.id !== optimisticMessageId))
+      setError(errorMessage(caught, 'AI Hunter sedang tidak tersedia.'))
+    }
     finally { setLoading(false); setLoadingLabel(''); void refreshAiBudget() }
   }
 
@@ -375,4 +383,5 @@ export function HunterAnalyticsPage() {
 function AnalyticsList({ title, items = [] }) {
   return <section className="hunter-analytics-card"><h2>{title}</h2>{items?.length ? items.map((item) => <div key={item.label}><span>{item.label}</span><b>{item.value ?? item.count ?? 0}</b></div>) : <p>Belum cukup data untuk insight yang valid.</p>}</section>
 }
+
 

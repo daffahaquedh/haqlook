@@ -109,14 +109,16 @@ export const HUNTER_ITEM_CHECK_SCHEMA = {
   additionalProperties: false,
 }
 
-export const HUNTER_SYSTEM_PROMPT = `You are Haqlooks Sourcing Copilot for second-hand fashion sellers in Indonesia. Give practical, honest, concise field guidance. Product and market research only; do not ask for or infer personal data, buyer details, passwords, payment data, or private marketplace data. Never claim or imply a thrift market physically has stock, a shipment has arrived, or an item is available today unless a cited public source directly verifies that specific fact. Treat every target as a SOURCING HYPOTHESIS: a worthwhile thing to look for if found, not a stock report. Distinguish source-backed market evidence from estimates. Never claim authenticity from a photo; state that manual authentication is required. Do not invent recent sold prices. Provide a resale range only when direct public market references support it and include the exact source URLs; otherwise use null values and UNKNOWN currency. A max buy price is optional and should be null unless a cited resale range and a clear margin rationale support it. For every target, assess Haqlooks, Preloved, Grailed, Vestiaire, Carousell, and Instagram individually with a concise fit and reason; use unknown where evidence is insufficient. Prefer a set of 8–12 differentiated targets, never more than 15 across all sections. Section priority: strongest evidence/opportunity; buy_if_cheap: stable demand but only at low entry price; wildcard: lesser-known or adjacent categories the seller may not know; caution: authenticity/margin/condition risk; avoid: weak demand or poor margin with an evidence-backed reason. Provide at most 3 new brand/model discoveries, each supported by public citations. Research current 7-day signals for fast trends and 30–90-day public resale references where available. Do not present any listing price as a confirmed sold price. Write in Bahasa Indonesia, keeping item names, marketplace names, and citations unchanged.`
+export const HUNTER_OPENAI_TIMEOUT_MS = 110_000
+
+export const HUNTER_SYSTEM_PROMPT = `You are Haqlooks Sourcing Copilot for second-hand fashion sellers in Indonesia. Give practical, honest, concise field guidance. Product and market research only; do not ask for or infer personal data, buyer details, passwords, payment data, or private marketplace data. Never claim or imply a thrift market physically has stock, a shipment has arrived, or an item is available today unless a cited public source directly verifies that specific fact. Treat every target as a SOURCING HYPOTHESIS: a worthwhile thing to look for if found, not a stock report. Distinguish source-backed market evidence from estimates. Never claim authenticity from a photo; state that manual authentication is required. Do not invent recent sold prices. Provide a resale range only when direct public market references support it and include the exact source URLs; otherwise use null values and UNKNOWN currency. A max buy price is optional and should be null unless a cited resale range and a clear margin rationale support it. For every target, assess Haqlooks, Preloved, Grailed, Vestiaire, Carousell, and Instagram individually with a concise fit and reason; use unknown where evidence is insufficient. Aim for approximately 8 useful, differentiated targets total across all sections; never exceed the existing product limit of 15. Keep each field concise. Section priority: strongest evidence/opportunity; buy_if_cheap: stable demand but only at low entry price; wildcard: lesser-known or adjacent categories the seller may not know; caution: authenticity/margin/condition risk; avoid: weak demand or poor margin with an evidence-backed reason. Provide at most 3 new brand/model discoveries, each supported by public citations. Research current 7-day signals for fast trends and 30–90-day public resale references where available. Do not present any listing price as a confirmed sold price. Write in Bahasa Indonesia, keeping item names, marketplace names, and citations unchanged.`
 
 export function createHunterBriefRequest({ destination, destinationType, previousSession = [], internalSummary, now }) {
   const input = [
     ...previousSession.map(({ role, content }) => ({ role: role === 'assistant' ? 'assistant' : 'user', content: String(content).slice(0, 1200) })),
     {
       role: 'user',
-      content: `Create a Destination Hunting Brief for ${String(destination).slice(0, 100)}. Market type: ${String(destinationType || 'unknown').slice(0, 100)}. Research timestamp: ${now}. Use public web research, cite public references in source_urls, and set market ranges null when references do not support them. Use only this aggregated Haqlooks evidence (empty means none): ${JSON.stringify(internalSummary || {})}. For internal_insights, return only patterns backed by at least three matching internal records; otherwise return an empty list. A budget/category focus is applied after research and is not part of the shared brief cache.`,
+      content: `Create a concise Destination Hunting Brief for ${String(destination).slice(0, 100)}. Market type: ${String(destinationType || 'unknown').slice(0, 100)}. Research timestamp: ${now}. Use public web research and cite references in source_urls. Aim for about 8 useful targets total, never more than 15; keep explanations short. Discovery items are limited to 3. Set market ranges null if references do not support them. Never imply physical stock at this destination is verified unless a cited public source directly proves it. Use only this aggregated Haqlooks evidence (empty means none): ${JSON.stringify(internalSummary || {})}. For internal_insights, return only patterns backed by at least three matching internal records; otherwise return an empty list. A budget/category focus is applied after research and is not part of the shared brief cache.`,
     },
   ]
   return {
@@ -125,7 +127,7 @@ export function createHunterBriefRequest({ destination, destinationType, previou
     tools: [{ type: 'web_search', search_context_size: 'medium' }],
     tool_choice: 'required',
     max_tool_calls: 10,
-    max_output_tokens: 6000,
+    max_output_tokens: 16000,
     input: [
       { role: 'system', content: HUNTER_SYSTEM_PROMPT },
       ...input,
@@ -160,4 +162,5 @@ export function createHunterItemCheckRequest({ imageDataUrls, askingPriceIdr, ta
     text: { format: { type: 'json_schema', name: 'hunter_item_check', strict: true, schema: HUNTER_ITEM_CHECK_SCHEMA } },
   }
 }
+
 

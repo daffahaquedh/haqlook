@@ -1,8 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { buildHunterCacheKey, detectHunterCategories, detectHunterDestination, filterHunterTargets, parseHunterBudget } from '../src/hunter-utils.js'
-import { createHunterBriefRequest, createHunterChatRequest, createHunterItemCheckRequest } from '../supabase/functions/seller-ai/hunter-analysis.ts'
-import { countWebSearchCalls, extractHunterCitations, sanitizeHunterBrief, summarizeHaqlooksData } from '../supabase/functions/seller-ai/hunter-utils.ts'
+import { createHunterBriefRequest, createHunterChatRequest, createHunterItemCheckRequest, HUNTER_OPENAI_TIMEOUT_MS } from '../supabase/functions/seller-ai/hunter-analysis.ts'
+import { countWebSearchCalls, extractHunterCitations, hunterResponseMetrics, parseCompletedHunterJson, sanitizeHunterBrief, summarizeHaqlooksData } from '../supabase/functions/seller-ai/hunter-utils.ts'
 import { estimateHunterCostIdr, hunterReservationCostIdr } from '../supabase/functions/seller-ai/pricing.ts'
 
 test('natural budget parsing handles localized IDR and shorthand', () => {
@@ -32,9 +32,42 @@ test('chat re-ranks stored targets locally while destination research uses web_s
   assert.deepEqual(research.tools, [{ type: 'web_search', search_context_size: 'medium' }])
   assert.equal(research.tool_choice, 'required')
   assert.equal(research.max_tool_calls, 10)
+  assert.equal(research.max_output_tokens, 16000)
+  assert.match(research.input[0].content, /approximately 8 useful/i)
+  assert.match(research.input[0].content, /never exceed the existing product limit of 15/i)
+  assert.match(research.input[0].content, /at most 3 new brand\/model discoveries/i)
   assert.equal(chat.model, 'gpt-6-luna')
   assert.deepEqual(chat.reasoning, { effort: 'low' })
   assert.equal(chat.tools, undefined)
+})
+
+test('Hunter OpenAI timeout leaves room below the Supabase 150s idle limit', () => {
+  assert.equal(HUNTER_OPENAI_TIMEOUT_MS, 110_000)
+  assert.ok(HUNTER_OPENAI_TIMEOUT_MS < 150_000)
+})
+
+test('Destination Brief refuses to parse incomplete output and reports token exhaustion specifically', () => {
+  assert.throws(() => parseCompletedHunterJson({ status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' }, output_text: '{"sections":' }), { code: 'AI_OUTPUT_LIMIT' })
+  assert.throws(() => parseCompletedHunterJson({ status: 'incomplete', incomplete_details: { reason: 'content_filter' }, output_text: '{}' }), { code: 'AI_CONTENT_FILTERED' })
+  assert.throws(() => parseCompletedHunterJson({ status: 'completed', output: [{ type: 'message', content: [{ type: 'refusal', refusal: 'declined' }] }] }), { code: 'AI_REFUSED' })
+  assert.throws(() => parseCompletedHunterJson({ status: 'incomplete', output_text: '{}' }), { code: 'AI_RESPONSE_INCOMPLETE' })
+})
+
+test('Destination Brief parses only completed final Structured Output', () => {
+  assert.deepEqual(parseCompletedHunterJson({ status: 'completed', output: [{ type: 'reasoning', summary: [] }, { type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: '{"ok":true}' }] }] }), { ok: true })
+  assert.throws(() => parseCompletedHunterJson({ status: 'completed', output: [{ type: 'message', content: [{ type: 'analysis_text', text: '{"partial":true}' }] }] }), { code: 'AI_EMPTY_RESPONSE' })
+  assert.throws(() => parseCompletedHunterJson({ status: 'completed', output_text: 'not-json' }), { code: 'AI_INVALID_RESPONSE' })
+})
+
+test('Hunter observability records safe response/token/search metrics without prompt fields', () => {
+  const metrics = hunterResponseMetrics({
+    status: 'incomplete',
+    incomplete_details: { reason: 'max_output_tokens' },
+    usage: { input_tokens: 24000, input_tokens_details: { cached_tokens: 12000 }, output_tokens: 6000, output_tokens_details: { reasoning_tokens: 900 } },
+    output: [{ type: 'web_search_call', action: { type: 'search' } }, { type: 'web_search_call', action: { type: 'search' } }],
+  })
+  assert.deepEqual(metrics, { response_status: 'incomplete', incomplete_reason: 'max_output_tokens', input_tokens: 24000, cached_input_tokens: 12000, output_tokens: 6000, reasoning_tokens: 900, web_search_calls: 2 })
+  assert.equal(Object.hasOwn(metrics, 'prompt'), false)
 })
 
 test('photo check stays a secondary no-web-search call with low reasoning', () => {
@@ -77,4 +110,5 @@ test('Hunter cost reservations include web search costs and usage uses centraliz
   assert.equal(measured.toolCostIdr, 320)
   assert.equal(measured.totalCostIdr, measured.tokenCostIdr + measured.toolCostIdr)
 })
+
 
