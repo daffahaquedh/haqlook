@@ -125,6 +125,7 @@ export function createHunterBriefRequest({ destination, destinationType, previou
     model: DEFAULT_MODEL,
     reasoning: { effort: 'medium' },
     tools: [{ type: 'web_search', search_context_size: 'medium' }],
+    include: ['web_search_call.action.sources'],
     tool_choice: 'required',
     max_tool_calls: 10,
     max_output_tokens: 16000,

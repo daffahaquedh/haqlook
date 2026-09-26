@@ -73,11 +73,54 @@ export function hunterResponseMetrics(payload: Record<string, unknown>) {
   }
 }
 
+function normalizeHunterSourceUrl(value: unknown) {
+  if (typeof value !== 'string' || value.length > 2048) return null
+  try {
+    const url = new URL(value.trim())
+    if (!['https:', 'http:'].includes(url.protocol) || !url.hostname || url.username || url.password) return null
+    url.pathname = url.pathname.replace(/\/+$/, '') || '/'
+    const key = `${url.protocol}//${url.host}${url.pathname === '/' ? '' : url.pathname}${url.search}${url.hash}`
+    return { url: url.href, key, hostname: url.hostname }
+  } catch {
+    return null
+  }
+}
+
+function addHunterSource(citations: Map<string, { url: string; title: string; hostname: string }>, value: unknown, titleValue: unknown) {
+  const source = normalizeHunterSourceUrl(value)
+  if (!source) return
+  const title = typeof titleValue === 'string' && titleValue.trim() ? titleValue.trim().slice(0, 240) : source.hostname
+  const existing = citations.get(source.key)
+  if (!existing || (existing.title === existing.hostname && title !== source.hostname)) {
+    citations.set(source.key, { url: source.url, title, hostname: source.hostname })
+  }
+}
+
+function trustedHunterSourceUrls(values: unknown, allowedSources: Map<string, string>, limit: number) {
+  const trusted = new Set<string>()
+  for (const value of Array.isArray(values) ? values : []) {
+    const normalized = normalizeHunterSourceUrl(value)
+    const providerUrl = normalized ? allowedSources.get(normalized.key) : undefined
+    if (providerUrl) trusted.add(providerUrl)
+    if (trusted.size >= limit) break
+  }
+  return [...trusted]
+}
+
 export function extractHunterCitations(payload: Record<string, unknown>) {
-  const citations = new Map<string, { url: string; title: string }>()
+  const citations = new Map<string, { url: string; title: string; hostname: string }>()
   for (const item of Array.isArray(payload.output) ? payload.output : []) {
     if (!item || typeof item !== 'object') continue
     const outputItem = item as Record<string, unknown>
+    if (outputItem.type === 'web_search_call') {
+      const action = outputItem.action && typeof outputItem.action === 'object' ? outputItem.action as Record<string, unknown> : {}
+      for (const sourceValue of Array.isArray(action.sources) ? action.sources : []) {
+        if (!sourceValue || typeof sourceValue !== 'object') continue
+        const source = sourceValue as Record<string, unknown>
+        addHunterSource(citations, source.url, source.title)
+      }
+      continue
+    }
     if (outputItem.type !== 'message') continue
     for (const part of Array.isArray(outputItem.content) ? outputItem.content : []) {
       if (!part || typeof part !== 'object') continue
@@ -86,15 +129,11 @@ export function extractHunterCitations(payload: Record<string, unknown>) {
         if (!annotation || typeof annotation !== 'object') continue
         const citation = annotation as Record<string, unknown>
         if (citation.type !== 'url_citation' || typeof citation.url !== 'string') continue
-        try {
-          const url = new URL(citation.url)
-          if (!['https:', 'http:'].includes(url.protocol)) continue
-          citations.set(url.href, { url: url.href, title: String(citation.title || url.hostname).slice(0, 240) })
-        } catch { /* Ignore malformed provider annotations. */ }
+        addHunterSource(citations, citation.url, citation.title)
       }
     }
   }
-  return [...citations.values()].slice(0, 30)
+  return [...citations.values()].slice(0, 30).map(({ url, title }) => ({ url, title }))
 }
 
 function positiveInteger(value: unknown) {
@@ -102,8 +141,8 @@ function positiveInteger(value: unknown) {
   return Number.isSafeInteger(number) && number > 0 ? number : null
 }
 
-function sanitizeTarget(target: Record<string, unknown>, allowedSources: Set<string>) {
-  const sourceUrls = [...new Set((Array.isArray(target.source_urls) ? target.source_urls : []).filter((url): url is string => typeof url === 'string' && allowedSources.has(url)))].slice(0, 5)
+function sanitizeTarget(target: Record<string, unknown>, allowedSources: Map<string, string>) {
+  const sourceUrls = trustedHunterSourceUrls(target.source_urls, allowedSources, 5)
   const currency = ['IDR', 'USD', 'EUR', 'JPY', 'GBP', 'OTHER', 'UNKNOWN'].includes(String(target.resale_currency)) ? String(target.resale_currency) : 'UNKNOWN'
   const candidateLow = sourceUrls.length ? positiveInteger(target.resale_low) : null
   const candidateHigh = sourceUrls.length ? positiveInteger(target.resale_high) : null
@@ -149,7 +188,10 @@ function sanitizeTarget(target: Record<string, unknown>, allowedSources: Set<str
 }
 
 export function sanitizeHunterBrief(brief: Record<string, unknown>, citations: Array<{ url: string; title: string }>) {
-  const allowedSources = new Set(citations.map((citation) => citation.url))
+  const allowedSources = new Map(citations.flatMap((citation) => {
+    const source = normalizeHunterSourceUrl(citation.url)
+    return source ? [[source.key, source.url] as const] : []
+  }))
   const rawSections = brief.sections && typeof brief.sections === 'object' ? brief.sections as Record<string, unknown> : {}
   const sections: Record<string, Array<Record<string, unknown>>> = {}
   let remaining = 15
@@ -168,7 +210,7 @@ export function sanitizeHunterBrief(brief: Record<string, unknown>, citations: A
     fake_risk: String(row.fake_risk || 'Authenticity not verified; manual verification required.').slice(0, 300),
     demand_signal: String(row.demand_signal || '').slice(0, 300),
     why_learn: String(row.why_learn || '').slice(0, 400),
-    source_urls: [...new Set((Array.isArray(row.source_urls) ? row.source_urls : []).filter((url): url is string => typeof url === 'string' && allowedSources.has(url)))].slice(0, 3),
+    source_urls: trustedHunterSourceUrls(row.source_urls, allowedSources, 3),
   })).filter((row) => row.name && row.source_urls.length)
   return {
     destination_name: String(brief.destination_name || '').slice(0, 100),

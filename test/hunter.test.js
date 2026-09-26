@@ -30,6 +30,7 @@ test('chat re-ranks stored targets locally while destination research uses web_s
   assert.equal(research.model, 'gpt-6-luna')
   assert.deepEqual(research.reasoning, { effort: 'medium' })
   assert.deepEqual(research.tools, [{ type: 'web_search', search_context_size: 'medium' }])
+  assert.deepEqual(research.include, ['web_search_call.action.sources'])
   assert.equal(research.tool_choice, 'required')
   assert.equal(research.max_tool_calls, 10)
   assert.equal(research.max_output_tokens, 16000)
@@ -89,6 +90,67 @@ test('only genuine Responses URL citations can support price ranges or discoveri
   assert.equal(brief.sections.priority[0].availability_classification, 'SOURCING_HYPOTHESIS')
   assert.equal(brief.sections.priority[1].resale_low, null)
   assert.equal(brief.sections.priority[1].max_buy_price_idr, null)
+})
+
+test('extracts annotation citations when they are the only provider sources', () => {
+  const citations = extractHunterCitations({ output: [{ type: 'message', content: [{ type: 'output_text', annotations: [{ type: 'url_citation', url: 'https://market.example/listing', title: 'Public listing' }] }] }] })
+  assert.deepEqual(citations, [{ url: 'https://market.example/listing', title: 'Public listing' }])
+})
+
+test('extracts web search action sources when annotations are absent', () => {
+  const citations = extractHunterCitations({ output: [{ type: 'web_search_call', action: { type: 'search', sources: [{ url: 'https://market.example/items/123', title: 'Market item' }, { url: 'https://other.example' }] } }] })
+  assert.deepEqual(citations, [
+    { url: 'https://market.example/items/123', title: 'Market item' },
+    { url: 'https://other.example/', title: 'other.example' },
+  ])
+})
+
+test('combines annotations and web search sources', () => {
+  const citations = extractHunterCitations({ output: [
+    { type: 'message', content: [{ type: 'output_text', annotations: [{ type: 'url_citation', url: 'https://cited.example/article', title: 'Cited article' }] }] },
+    { type: 'web_search_call', action: { sources: [{ url: 'https://searched.example/result', title: 'Search result' }] } },
+  ] })
+  assert.deepEqual(citations.map((citation) => citation.url), ['https://cited.example/article', 'https://searched.example/result'])
+})
+
+test('deduplicates normalized URLs and prefers a supplied source title', () => {
+  const citations = extractHunterCitations({ output: [
+    { type: 'message', content: [{ type: 'output_text', annotations: [{ type: 'url_citation', url: 'https://EXAMPLE.com/listing/', title: '' }] }] },
+    { type: 'web_search_call', action: { sources: [{ url: 'https://example.com/listing', title: 'Listing source' }] } },
+  ] })
+  assert.deepEqual(citations, [{ url: 'https://example.com/listing', title: 'Listing source' }])
+})
+
+test('rejects malformed, non-http and credential-bearing provider URLs', () => {
+  const citations = extractHunterCitations({ output: [{ type: 'web_search_call', action: { sources: [
+    { url: 'not a url', title: 'Malformed' },
+    { url: 'ftp://market.example/item', title: 'FTP' },
+    { url: 'javascript:alert(1)', title: 'Script' },
+    { url: 'https://user:pass@market.example/item', title: 'Credentials' },
+  ] } }] })
+  assert.deepEqual(citations, [])
+})
+
+test('does not trust model-generated URLs and leaves unsupported price fields null', () => {
+  const providerSources = extractHunterCitations({ output: [{ type: 'web_search_call', action: { sources: [{ url: 'https://provider.example/listing', title: 'Provider result' }] } }] })
+  const brief = sanitizeHunterBrief({ sections: { priority: [{
+    item_name: 'Unverified jacket', source_urls: ['https://invented.example/price'],
+    resale_low: 100000, resale_high: 200000, resale_currency: 'IDR', max_buy_price_idr: 80000,
+  }] } }, providerSources)
+  assert.deepEqual(brief.sections.priority[0].source_urls, [])
+  assert.equal(brief.sections.priority[0].resale_low, null)
+  assert.equal(brief.sections.priority[0].resale_high, null)
+  assert.equal(brief.sections.priority[0].max_buy_price_idr, null)
+})
+
+test('brief keeps only provider-backed target URLs with harmless trailing-slash normalization', () => {
+  const providerSources = extractHunterCitations({ output: [{ type: 'web_search_call', action: { sources: [{ url: 'https://provider.example/listing', title: 'Provider listing' }] } }] })
+  const brief = sanitizeHunterBrief({ sections: { priority: [{
+    item_name: 'Jacket', source_urls: ['https://PROVIDER.example/listing/'],
+    resale_low: 100000, resale_high: 200000, resale_currency: 'IDR',
+  }] } }, providerSources)
+  assert.deepEqual(brief.sections.priority[0].source_urls, ['https://provider.example/listing'])
+  assert.equal(brief.sections.priority[0].resale_low, 100000)
 })
 
 test('internal insight aggregates require at least three matching records', () => {
