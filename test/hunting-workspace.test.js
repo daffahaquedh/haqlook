@@ -58,7 +58,7 @@ test('only purchased, unconverted candidates show the existing inventory convers
 
 test('successful conversion shows final state and opens the created Product Detail explicitly', () => {
   assert.equal(sourcingCandidateIsInInventory({ status: 'BOUGHT', product_id: 'product-id' }), true)
-  assert.match(sellerSource, /Barang sudah masuk ke Inventory/)
+  assert.match(sellerSource, /Temuan berhasil dipindahkan ke Barang/)
   assert.match(sellerSource, /Buka barang →/)
   assert.match(sellerSource, /go\(`\/seller\/inventory\/\$\{productId\}`\)/)
   assert.doesNotMatch(sellerSource, /Candidate moved to master inventory/)
@@ -94,4 +94,3 @@ test('Hunter React workspace still uses only the existing paid action gates and 
   assert.match(hunterSource, /onClick=\{\(\) => void confirmResearch\(\)\}/)
   assert.match(hunterSource, /onConfirmRefresh=\{\(\) => void confirmRefresh\(\)\}/)
 })
-

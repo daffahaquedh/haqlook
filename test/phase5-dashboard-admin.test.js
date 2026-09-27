@@ -23,6 +23,19 @@ test('Seller Beranda has a concise, action-first Indonesian home and no AI budge
   assert.doesNotMatch(dashboardSource, /AI BUDGET|Monthly usage/)
 })
 
+test('Seller sign-in, Barang, and item-entry flows use Indonesian labels', () => {
+  assert.match(sellerSource, /Alamat email/)
+  assert.match(sellerSource, /Kata sandi/)
+  assert.match(sellerSource, /Kembali ke etalase/)
+  assert.match(sellerSource, /placeholder="Cari SKU, merek, atau nama barang…"/)
+  assert.match(sellerSource, /<option value="capital">Modal tertinggi<\/option>/)
+  assert.match(sellerSource, /title="Informasi barang"/)
+  assert.match(sellerSource, /label="Modal pembelian"/)
+  assert.match(sellerSource, /SIMPAN & TERSEDIA/)
+  assert.match(sellerSource, /title="Edit barang"/)
+  assert.match(sellerSource, /Tampilkan di etalase publik/)
+})
+
 test('Admin Insight retains all existing destinations inside one route-compatible workspace', () => {
   assert.deepEqual(ADMIN_INSIGHT_TABS.map(({ id, href }) => [id, href]), [
     ['business', '/seller/analytics'], ['hunter', '/seller/hunter-analytics'], ['ai-usage', '/seller/ai-usage'],

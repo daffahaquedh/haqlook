@@ -101,7 +101,7 @@ test('global listing edit updates only tracker status, price, and URL; HTTP(S) v
 
 test('manual listing edit does not invoke AI or change Listing Generator behavior', () => {
   assert.doesNotMatch(listingsSource, /seller-ai|functions\.invoke|web_search|AIUsage/)
-  assert.match(listingsSource, /Edit status \/ harga \/ URL/)
+  assert.match(listingsSource, /Ubah status \/ harga \/ URL/)
   assert.match(generatorSource, /createListingGenerationBody\(item\.id, selected, newRequestId\(\)\)/)
   assert.match(generatorSource, /functions\.invoke\('seller-ai', \{ body \}\)/)
 })
@@ -148,7 +148,7 @@ test('Seller authorization is preserved and Admin remains a superset', () => {
 test('both workspace tabs and listing edit controls remain keyboard reachable and announce selection', () => {
   assert.match(workspaceSource, /aria-current=\{activeTab === 'listings' \? 'page' : undefined\}/)
   assert.match(workspaceSource, /aria-current=\{activeTab === 'sales' \? 'page' : undefined\}/)
-  assert.match(listingsSource, /aria-label=\{`Edit listing \$\{marketplaceLabel\} untuk \$\{productTitle\}`\}/)
+  assert.match(listingsSource, /aria-label=\{`Ubah listing \$\{marketplaceLabel\} untuk \$\{productTitle\}`\}/)
   assert.match(sellerStyles, /\.jualan-workspace-tabs a:focus-visible/)
   assert.match(sellerStyles, /\.listing-status-filters button:focus-visible/)
 })

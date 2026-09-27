@@ -24,6 +24,7 @@ import {
   applyItemAnalysisSuggestions,
   canAccessWorkspaceSection,
   INVENTORY_STATUSES,
+  inventoryStatusLabel,
   ITEM_ANALYSIS_SUGGESTIONS,
   LISTING_STATUSES,
   MARKETPLACES,
@@ -75,7 +76,7 @@ function imageFor(item) {
   return item?.image_urls?.[0] || '/mascot-latest.png'
 }
 
-function errorText(error, fallback = 'Something went wrong. Please try again.') {
+function errorText(error, fallback = 'Terjadi kendala. Silakan coba lagi.') {
   return error?.message || fallback
 }
 
@@ -111,7 +112,7 @@ export default function SellerApp({ path }) {
     return () => { active = false; listener?.subscription?.unsubscribe() }
   }, [])
 
-  if (auth.state === 'loading') return <SellerLoading text="Checking seller access…" />
+  if (auth.state === 'loading') return <SellerLoading text="Memeriksa akses seller…" />
   if (auth.state !== 'signed_in') return <SellerLogin />
   return <SellerWorkspace path={path} profile={auth.profile} onLogout={async () => { await supabase?.auth.signOut(); go('/seller') }} />
 }
@@ -126,20 +127,20 @@ function SellerLogin() {
     event.preventDefault()
     setMessage('')
     if (!supabase) {
-      setMessage('Seller access is not configured in this environment. Add the Supabase variables first.')
+      setMessage('Akses seller belum dikonfigurasi di lingkungan ini.')
       return
     }
     setBusy(true)
     const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) setMessage(errorText(error, 'Unable to sign in.'))
+    if (error) setMessage(errorText(error, 'Tidak dapat masuk. Periksa email dan kata sandi.'))
     else go('/seller')
     setBusy(false)
   }
 
   return <main className="seller-auth-page">
     <section className="seller-auth-art"><img src="/mascot-latest.png" alt="HAQLOOKS mascot" /><p>PRE-OWNED SNEAKERS.<br />NEW STORIES.</p></section>
-    <section className="seller-auth-card"><span className="seller-kicker">HAQLOOKS / PRIVATE WORKSPACE</span><h1>SELLER<br /><em>PANEL</em></h1><p>Manage the master inventory, sourcing list, listings, and sales from one mobile-first workspace.</p>
-      <form onSubmit={submit}><label>Email address<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" required /></label><label>Password<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required /></label>{message && <Notice tone="error">{message}</Notice>}<button className="seller-primary" disabled={busy}>{busy ? 'SIGNING IN…' : 'SIGN IN →'}</button></form><a className="seller-back" href="/" onClick={(event) => { event.preventDefault(); go('/') }}>← Back to storefront</a>
+    <section className="seller-auth-card"><span className="seller-kicker">HAQLOOKS / RUANG KERJA</span><h1>PANEL<br /><em>SELLER</em></h1><p>Kelola barang, hunting, listing marketplace, dan penjualan dari satu ruang kerja.</p>
+      <form onSubmit={submit}><label>Alamat email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" required /></label><label>Kata sandi<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required /></label>{message && <Notice tone="error">{message}</Notice>}<button className="seller-primary" disabled={busy}>{busy ? 'MEMASUKKAN…' : 'MASUK →'}</button></form><a className="seller-back" href="/" onClick={(event) => { event.preventDefault(); go('/') }}>← Kembali ke etalase</a>
     </section>
   </main>
 }
@@ -332,7 +333,7 @@ function SellerDashboard({ profile, analytics = false }) {
   if (analytics) return <div className="dashboard-page dashboard-analytics">
     <SellerHeader eyebrow="INSIGHT / BISNIS" title="Ringkasan bisnis" copy="Pantau stok dan hasil transaksi yang tercatat." />
     {message && <Notice tone="warning">{message}</Notice>}
-    <section className="seller-stat-grid"><Stat label="Total unit aktif" value={metric(summary?.total_stock)} /><Stat label="Tersedia" value={metric(summary?.available)} tone="green" /><Stat label="Draft" value={metric(summary?.draft)} tone="muted" /><Stat label="Dipesan" value={metric(summary?.reserved)} tone="yellow" /><Stat label="Terjual" value={metric(summary?.sold)} tone="red" /></section>
+    <section className="seller-stat-grid"><Stat label="Total unit aktif" value={metric(summary?.total_stock)} /><Stat label="Tersedia" value={metric(summary?.available)} tone="green" /><Stat label="Draf" value={metric(summary?.draft)} tone="muted" /><Stat label="Dipesan" value={metric(summary?.reserved)} tone="yellow" /><Stat label="Terjual" value={metric(summary?.sold)} tone="red" /></section>
     <section className="seller-finance-grid dashboard-finance-grid"><Metric label="Modal berjalan" value={metric(summary?.total_modal_active, true)} /><Metric label="Estimasi nilai stok" value={metric(summary?.estimated_stock_value, true)} /><Metric label="Pendapatan tercatat" value={metric(summary?.revenue, true)} /><Metric label="Laba kotor tercatat" value={metric(summary?.gross_profit, true)} /><Metric label="Laba bersih tercatat" value={metric(summary?.net_profit, true)} /></section>
   </div>
 
@@ -341,7 +342,7 @@ function SellerDashboard({ profile, analytics = false }) {
     {message && <Notice tone="warning" role="status">{message}</Notice>}
     <section className="dashboard-quick-actions" aria-label="Aksi cepat">
       <DashboardQuickAction href="/seller/inventory/new" icon="＋" title="Tambah barang" detail="Catat stok baru" />
-      <DashboardQuickAction href="/seller/inventory" icon="▣" title="Cek barang" detail="Buka inventory" />
+      <DashboardQuickAction href="/seller/inventory" icon="▣" title="Cek barang" detail="Lihat daftar barang" />
       <DashboardQuickAction href="/seller/ai-hunter" icon="✦" title="Mulai hunting" detail="Cari peluang" />
     </section>
     <section className="dashboard-home-stats" aria-label="Ringkasan usaha">
@@ -353,7 +354,7 @@ function SellerDashboard({ profile, analytics = false }) {
       <PanelTitle eyebrow="TINDAK LANJUT" title="Yang perlu ditinjau" />
       {loading ? <p className="seller-muted">Memuat tindak lanjut…</p> : draftListingCount || boughtCandidateCount ? <div className="dashboard-task-list">
         {draftListingCount > 0 && <DashboardTaskCard title="Listing masih draft" count={draftListingCount} href="/seller/listings" items={draftListings.map((listing) => ({ key: listing.id, title: `${listing.products?.brand ? `${listing.products.brand} ` : ''}${listing.products?.name || 'Barang'}`, meta: `${listing.products?.sku || 'SKU'} · ${listing.marketplace || 'Marketplace'}` }))} action="Tinjau listing" />}
-        {boughtCandidateCount > 0 && <DashboardTaskCard title="Barang dibeli, belum masuk inventory" count={boughtCandidateCount} href="/seller/sourcing" items={boughtCandidates.map((candidate) => ({ key: candidate.id, title: candidate.title || candidate.brand || 'Temuan tanpa nama', meta: candidate.source_platform || 'Sumber belum dicatat' }))} action="Buka temuan" />}
+        {boughtCandidateCount > 0 && <DashboardTaskCard title="Barang dibeli, belum masuk Barang" count={boughtCandidateCount} href="/seller/sourcing" items={boughtCandidates.map((candidate) => ({ key: candidate.id, title: candidate.title || candidate.brand || 'Temuan tanpa nama', meta: candidate.source_platform || 'Sumber belum dicatat' }))} action="Buka temuan" />}
       </div> : <p className="seller-muted dashboard-no-tasks">Belum ada listing draft atau temuan yang menunggu dipindahkan ke Barang.</p>}
     </section>
   </div>
@@ -381,10 +382,10 @@ function InventoryPage() {
     load()
   }, [filters, page])
   function update(key, value) { setPage(0); setFilters((current) => ({ ...current, [key]: value })) }
-  return <div><SellerHeader eyebrow="MASTER DATABASE" title="Barang" copy="One SKU, one source of truth. Keep every channel downstream from this list." action={<a href="/seller/inventory/new" className="seller-primary compact" onClick={(event) => { event.preventDefault(); go('/seller/inventory/new') }}>＋ Tambah barang</a>} />{message && <Notice tone="error">{message}</Notice>}<section className="inventory-toolbar"><input value={filters.q} onChange={(event) => update('q', event.target.value)} placeholder="Search SKU, brand, title…" /><select value={filters.status} onChange={(event) => update('status', event.target.value)}><option value="">All status</option>{INVENTORY_STATUSES.map((status) => <option key={status} value={status}>{titleCaseStatus(status)}</option>)}</select><input value={filters.brand} onChange={(event) => update('brand', event.target.value)} placeholder="Brand filter" /><select value={filters.sort} onChange={(event) => update('sort', event.target.value)}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="capital">Highest capital</option></select></section><div className="inventory-count">{count} records · page {page + 1}</div><section className="inventory-list">{items.length ? items.map((item) => <InventoryCard key={item.id} item={item} />) : <div className="seller-empty"><strong>NO INVENTORY FOUND</strong><p>Add the first item or adjust your filters.</p></div>}</section><div className="pagination"><button type="button" disabled={page === 0} onClick={() => setPage((value) => value - 1)}>← Previous</button><button type="button" disabled={(page + 1) * pageSize >= count} onClick={() => setPage((value) => value + 1)}>Next →</button></div></div>
+  return <div><SellerHeader eyebrow="OPERASIONAL / BARANG" title="Barang" copy="Satu SKU untuk satu sumber data. Kelola semua channel dari daftar ini." action={<a href="/seller/inventory/new" className="seller-primary compact" onClick={(event) => { event.preventDefault(); go('/seller/inventory/new') }}>＋ Tambah barang</a>} />{message && <Notice tone="error">{message}</Notice>}<section className="inventory-toolbar"><input value={filters.q} onChange={(event) => update('q', event.target.value)} placeholder="Cari SKU, merek, atau nama barang…" /><select value={filters.status} onChange={(event) => update('status', event.target.value)}><option value="">Semua status</option>{INVENTORY_STATUSES.map((status) => <option key={status} value={status}>{inventoryStatusLabel(status)}</option>)}</select><input value={filters.brand} onChange={(event) => update('brand', event.target.value)} placeholder="Filter merek" /><select value={filters.sort} onChange={(event) => update('sort', event.target.value)}><option value="newest">Terbaru</option><option value="oldest">Terlama</option><option value="capital">Modal tertinggi</option></select></section><div className="inventory-count" aria-live="polite">{count} barang · halaman {page + 1}</div><section className="inventory-list">{items.length ? items.map((item) => <InventoryCard key={item.id} item={item} />) : <div className="seller-empty"><strong>Belum ada barang.</strong><p>Tambahkan barang pertama atau sesuaikan filter.</p></div>}</section><div className="pagination"><button type="button" disabled={page === 0} onClick={() => setPage((value) => value - 1)}>← Sebelumnya</button><button type="button" disabled={(page + 1) * pageSize >= count} onClick={() => setPage((value) => value + 1)}>Berikutnya →</button></div></div>
 }
 
-function InventoryCard({ item }) { return <a href={`/seller/inventory/${item.id}`} className="inventory-card" onClick={(event) => { event.preventDefault(); go(`/seller/inventory/${item.id}`) }}><img src={imageFor(item)} alt="" /><div className="inventory-card-main"><div className="inventory-card-top"><span className="sku">{item.sku || 'SKU pending'}</span><span className={`inventory-status ${item.status}`}>{titleCaseStatus(item.status)}</span></div><h2>{item.brand} {item.name}</h2><p>{item.size_label || 'Size not set'} · {item.condition || 'Condition not set'}</p><div className="inventory-card-bottom"><strong>{moneyIdr(item.purchase_price)}</strong><span>Sell {moneyIdr(item.suggested_price || item.price_idr)}</span></div></div></a> }
+function InventoryCard({ item }) { return <a href={`/seller/inventory/${item.id}`} className="inventory-card" onClick={(event) => { event.preventDefault(); go(`/seller/inventory/${item.id}`) }}><img src={imageFor(item)} alt="" /><div className="inventory-card-main"><div className="inventory-card-top"><span className="sku">{item.sku || 'SKU belum tersedia'}</span><span className={`inventory-status ${item.status}`}>{inventoryStatusLabel(item.status)}</span></div><h2>{item.brand} {item.name}</h2><p>{item.size_label || 'Ukuran belum diisi'} · {item.condition || 'Kondisi belum diisi'}</p><div className="inventory-card-bottom"><strong>{moneyIdr(item.purchase_price)}</strong><span>Harga jual {moneyIdr(item.suggested_price || item.price_idr)}</span></div></div></a> }
 
 function NewInventory() {
   const [form, setForm] = useState({ brand: '', name: '', category: '', subcategory: '', size_label: '', condition: 'Good', condition_notes: '', defects: '', purchase_price: '', suggested_price: '', minimum_price: '', source: '', source_url: '', purchase_date: today(), status: 'draft', description: '' })
@@ -442,8 +443,8 @@ function NewInventory() {
   async function save(event) {
     event.preventDefault(); setMessage('')
     if (photoBusy) return
-    if (!supabase) { setMessage('Supabase is not configured.'); return }
-    if (form.source_url && !safeHttpUrl(form.source_url)) { setMessage('Source URL must use http:// or https://.'); return }
+    if (!supabase) { setMessage('Koneksi database belum dikonfigurasi.'); return }
+    if (form.source_url && !safeHttpUrl(form.source_url)) { setMessage('Tautan sumber harus diawali http:// atau https://.'); return }
     setBusy(true)
     try {
       const imageUrls = await upload()
@@ -451,22 +452,22 @@ function NewInventory() {
       const { data, error } = await supabase.from('products').insert(payload).select('id').single()
       if (error) throw error
       go(`/seller/inventory/${data.id}`)
-    } catch (error) { setMessage(errorText(error, 'Unable to save this item.')) }
+    } catch (error) { setMessage(errorText(error, 'Barang belum dapat disimpan. Silakan coba lagi.')) }
     setBusy(false)
   }
-  return <div><SellerHeader eyebrow="MASTER DATABASE / NEW ITEM" title="Tambah barang" copy="Capture the item in HAQLOOKS before analysing or distributing it." action={<button className="seller-secondary compact" type="button" onClick={() => go('/seller/inventory')}>Cancel</button>} />{message && <Notice tone="error">{message}</Notice>}<form className="seller-form" onSubmit={save}>
-    <section className="seller-panel"><PanelTitle eyebrow="01 / FOTO BARANG" title="Product photos" /><p className="photo-picker-copy">Ambil foto atau pilih beberapa foto produk dari galeri. Detail label, jahitan, motif, dan kondisi tetap penting.</p><div className="photo-uploader"><div className="photo-preview-grid">{photos.length ? photos.map((photo, index) => <div className="photo-preview" key={photo.id}><img src={photo.preview} alt={`Product photo preview ${index + 1}`} /><button type="button" aria-label={`Remove photo ${index + 1}`} onClick={() => removePhoto(photo.id)}>×</button></div>) : <div className="photo-empty"><strong>Belum ada foto / No photos yet</strong><span>Foto terang dan tajam membantu memeriksa tag, stitching, print, serta defect.</span></div>}</div><div className="photo-picker-actions">
-      <input className="photo-picker-input" {...CAMERA_PICKER_PROPS} ref={cameraPicker} aria-label="Take a product photo" tabIndex={-1} onChange={chooseFiles} />
-      <input className="photo-picker-input" {...GALLERY_PICKER_PROPS} ref={galleryPicker} aria-label="Choose product photos from gallery" tabIndex={-1} onChange={chooseFiles} />
-      <button className="photo-picker-action" type="button" onClick={() => cameraPicker.current?.click()} disabled={photoBusy || photos.length >= MAX_PRODUCT_PHOTOS}><span>📷 Ambil Foto</span><small>Take Photo</small></button>
-      <button className="photo-picker-action gallery" type="button" onClick={() => galleryPicker.current?.click()} disabled={photoBusy || photos.length >= MAX_PRODUCT_PHOTOS}><span>🖼 Pilih dari Galeri</span><small>Choose from Gallery</small></button>
-      <div className="photo-count" aria-live="polite">{photos.length} / {MAX_PRODUCT_PHOTOS} foto dipilih <span>/ photos selected</span>{photoBusy && <b> · Memproses foto… / Processing…</b>}</div>
+  return <div><SellerHeader eyebrow="BARANG / TAMBAH" title="Tambah barang" copy="Catat barang di HAQLOOKS sebelum dianalisis atau disiapkan untuk dijual." action={<button className="seller-secondary compact" type="button" onClick={() => go('/seller/inventory')}>Batal</button>} />{message && <Notice tone="error">{message}</Notice>}<form className="seller-form" onSubmit={save}>
+    <section className="seller-panel"><PanelTitle eyebrow="01 / FOTO BARANG" title="Foto barang" /><p className="photo-picker-copy">Ambil foto atau pilih beberapa foto dari galeri. Pastikan label, jahitan, motif, dan kondisi terlihat jelas.</p><div className="photo-uploader"><div className="photo-preview-grid">{photos.length ? photos.map((photo, index) => <div className="photo-preview" key={photo.id}><img src={photo.preview} alt={`Pratinjau foto barang ${index + 1}`} /><button type="button" aria-label={`Hapus foto ${index + 1}`} onClick={() => removePhoto(photo.id)}>×</button></div>) : <div className="photo-empty"><strong>Belum ada foto</strong><span>Foto yang terang dan tajam membantu memeriksa label, jahitan, motif, serta kerusakan.</span></div>}</div><div className="photo-picker-actions">
+      <input className="photo-picker-input" {...CAMERA_PICKER_PROPS} ref={cameraPicker} aria-label="Ambil foto barang" tabIndex={-1} onChange={chooseFiles} />
+      <input className="photo-picker-input" {...GALLERY_PICKER_PROPS} ref={galleryPicker} aria-label="Pilih foto barang dari galeri" tabIndex={-1} onChange={chooseFiles} />
+      <button className="photo-picker-action" type="button" onClick={() => cameraPicker.current?.click()} disabled={photoBusy || photos.length >= MAX_PRODUCT_PHOTOS}><span>📷 Ambil Foto</span><small>Buka kamera</small></button>
+      <button className="photo-picker-action gallery" type="button" onClick={() => galleryPicker.current?.click()} disabled={photoBusy || photos.length >= MAX_PRODUCT_PHOTOS}><span>🖼 Pilih dari Galeri</span><small>Pilih beberapa foto</small></button>
+      <div className="photo-count" aria-live="polite">{photos.length} / {MAX_PRODUCT_PHOTOS} foto dipilih{photoBusy && <b> · Memproses foto…</b>}</div>
       {photoMessage && <p className="photo-picker-error" role="alert">{photoMessage}</p>}
     </div></div></section>
-    <section className="seller-panel"><PanelTitle eyebrow="02 / IDENTITY" title="Basic information" /><div className="seller-fields two"><Field label="Brand" value={form.brand} onChange={(value) => set('brand', value)} required placeholder="Stussy" /><Field label="Item name" value={form.name} onChange={(value) => set('name', value)} required placeholder="Work Jacket" /><Field label="Category" value={form.category} onChange={(value) => set('category', value)} placeholder="Jackets" /><Field label="Subcategory" value={form.subcategory} onChange={(value) => set('subcategory', value)} placeholder="Workwear" /><Field label="Size" value={form.size_label} onChange={(value) => set('size_label', value)} placeholder="L / 42" /><Field label="Condition" value={form.condition} onChange={(value) => set('condition', value)} placeholder="Excellent" /><Field label="Condition notes" value={form.condition_notes} onChange={(value) => set('condition_notes', value)} placeholder="Light wear on cuff" /><Field label="Defects / minus" value={form.defects} onChange={(value) => set('defects', value)} placeholder="None" /></div></section>
-    <section className="seller-panel"><PanelTitle eyebrow="03 / MONEY" title="Capital & pricing" /><div className="seller-fields three"><Field label="Purchase price" value={form.purchase_price} onChange={(value) => set('purchase_price', value)} type="number" required placeholder="750000" /><Field label="Suggested price" value={form.suggested_price} onChange={(value) => set('suggested_price', value)} type="number" placeholder="2250000" /><Field label="Minimum price" value={form.minimum_price} onChange={(value) => set('minimum_price', value)} type="number" placeholder="1900000" /></div></section>
-    <section className="seller-panel"><PanelTitle eyebrow="04 / SOURCE" title="Where it came from" /><div className="seller-fields two"><Field label="Source" value={form.source} onChange={(value) => set('source', value)} placeholder="Hunting / seller name" /><Field label="Source URL" value={form.source_url} onChange={(value) => set('source_url', value)} placeholder="https://…" /><Field label="Purchase date" value={form.purchase_date} onChange={(value) => set('purchase_date', value)} type="date" /><label>Status<select value={form.status} onChange={(event) => set('status', event.target.value)}><option value="draft">Save as draft</option><option value="available">Save & available</option></select></label><Field label="Description" value={form.description} onChange={(value) => set('description', value)} textarea placeholder="The customer-facing story for this item…" /></div></section>
-    <div className="seller-form-actions"><button className="seller-primary" disabled={busy || photoBusy}>{busy ? 'SAVING…' : form.status === 'available' ? 'SAVE & AVAILABLE →' : 'SAVE AS DRAFT →'}</button><button type="button" className="seller-secondary" onClick={() => go('/seller/inventory')}>Cancel</button></div></form></div>
+    <section className="seller-panel"><PanelTitle eyebrow="02 / IDENTITAS" title="Informasi barang" /><div className="seller-fields two"><Field label="Merek" value={form.brand} onChange={(value) => set('brand', value)} required placeholder="Stussy" /><Field label="Nama barang" value={form.name} onChange={(value) => set('name', value)} required placeholder="Jaket kerja" /><Field label="Kategori" value={form.category} onChange={(value) => set('category', value)} placeholder="Jaket" /><Field label="Subkategori" value={form.subcategory} onChange={(value) => set('subcategory', value)} placeholder="Pakaian kerja" /><Field label="Ukuran" value={form.size_label} onChange={(value) => set('size_label', value)} placeholder="L / 42" /><Field label="Kondisi" value={form.condition} onChange={(value) => set('condition', value)} placeholder="Sangat baik" /><Field label="Catatan kondisi" value={form.condition_notes} onChange={(value) => set('condition_notes', value)} placeholder="Sedikit aus di ujung lengan" /><Field label="Kekurangan / minus" value={form.defects} onChange={(value) => set('defects', value)} placeholder="Tidak ada" /></div></section>
+    <section className="seller-panel"><PanelTitle eyebrow="03 / HARGA" title="Modal & harga" /><div className="seller-fields three"><Field label="Modal pembelian" value={form.purchase_price} onChange={(value) => set('purchase_price', value)} type="number" required placeholder="750000" /><Field label="Harga jual disarankan" value={form.suggested_price} onChange={(value) => set('suggested_price', value)} type="number" placeholder="2250000" /><Field label="Harga minimum" value={form.minimum_price} onChange={(value) => set('minimum_price', value)} type="number" placeholder="1900000" /></div></section>
+    <section className="seller-panel"><PanelTitle eyebrow="04 / ASAL BARANG" title="Asal barang" /><div className="seller-fields two"><Field label="Sumber" value={form.source} onChange={(value) => set('source', value)} placeholder="Hunting / nama penjual" /><Field label="Tautan sumber" value={form.source_url} onChange={(value) => set('source_url', value)} placeholder="https://…" /><Field label="Tanggal pembelian" value={form.purchase_date} onChange={(value) => set('purchase_date', value)} type="date" /><label>Status<select value={form.status} onChange={(event) => set('status', event.target.value)}><option value="draft">Simpan sebagai draf</option><option value="available">Simpan dan tandai tersedia</option></select></label><Field label="Deskripsi" value={form.description} onChange={(value) => set('description', value)} textarea placeholder="Cerita singkat barang untuk calon pembeli…" /></div></section>
+    <div className="seller-form-actions"><button className="seller-primary" disabled={busy || photoBusy}>{busy ? 'MENYIMPAN…' : form.status === 'available' ? 'SIMPAN & TERSEDIA →' : 'SIMPAN SEBAGAI DRAF →'}</button><button type="button" className="seller-secondary" onClick={() => go('/seller/inventory')}>Batal</button></div></form></div>
 }
 
 function Field({ label, value, onChange, type = 'text', placeholder, required = false, textarea = false, name }) { return <label>{label}{textarea ? <textarea name={name} value={value} onChange={onChange ? (event) => onChange(event.target.value) : undefined} placeholder={placeholder} rows="4" required={required} /> : <input name={name} type={type} value={value} onChange={onChange ? (event) => onChange(event.target.value) : undefined} placeholder={placeholder} required={required} />}</label> }
@@ -480,7 +481,7 @@ function InventoryDetail({ id }) {
       supabase.from('marketplace_listings').select('*').eq('product_id', id).order('marketplace'),
       supabase.from('sales').select('*').eq('product_id', id).order('sold_at', { ascending: false }),
     ])
-    if (error) setMessage(errorText(error, 'Inventory item not found.')); else { setItem(product); setListings(listingData || []); setSales(saleData || []) }
+    if (error) setMessage(errorText(error, 'Barang tidak ditemukan.')); else { setItem(product); setListings(listingData || []); setSales(saleData || []) }
   }
   useEffect(() => { setActiveTab(productDetailTabForRoute(new URLSearchParams(window.location.search).get('tab'))); setMessage(''); setAnalysis(null); setLastAnalysis(null); setAnalysisApplied(false); setAnalysisMessage(''); setSelectedSuggestions({}); setEditingListing(null); setShowSold(false); setShowListingGenerator(false); load() }, [id])
   function handleTabKeyDown(event, tabId) {
@@ -491,12 +492,12 @@ function InventoryDetail({ id }) {
     requestAnimationFrame(() => tabRefs.current[nextTab]?.focus())
   }
   async function analyzeItem() {
-    if (!AI_ENABLED) { setAnalysisMessage('AI belum diaktifkan. Inventory tetap dapat digunakan.'); return }
-    if (!supabase) { setAnalysisMessage('Supabase is not configured in this environment.'); return }
+    if (!AI_ENABLED) { setAnalysisMessage('AI belum diaktifkan. Barang tetap dapat dikelola seperti biasa.'); return }
+    if (!supabase) { setAnalysisMessage('Koneksi database belum dikonfigurasi di lingkungan ini.'); return }
     setAnalysisMessage(''); setAnalysisBusy(true)
     const { data, error } = await supabase.functions.invoke('seller-ai', { body: { feature: 'ITEM_ANALYSIS', product_id: id } })
     if (error || !data?.ok) {
-      setAnalysisMessage(data?.message || errorText(error, 'AI analysis failed.'))
+      setAnalysisMessage(data?.message || errorText(error, 'Analisis AI gagal. Silakan coba lagi.'))
     } else {
       const result = data.result || {}
       const defaults = Object.fromEntries(ITEM_ANALYSIS_SUGGESTIONS.map(({ key }) => [key, Boolean(analysisSuggestionValue(result, key))]))
@@ -508,17 +509,17 @@ function InventoryDetail({ id }) {
     const next = applyItemAnalysisSuggestions(item, analysis?.result, selectedSuggestions)
     const updates = {}
     ITEM_ANALYSIS_SUGGESTIONS.forEach(({ target }) => { if (next[target] !== item[target]) updates[target] = next[target] })
-    if (!Object.keys(updates).length) { setAnalysisMessage('Select at least one suggestion to apply.'); return }
+    if (!Object.keys(updates).length) { setAnalysisMessage('Pilih setidaknya satu saran untuk diterapkan.'); return }
     setAnalysisBusy(true)
     const { data, error } = await supabase.from('products').update({ ...updates, updated_at: new Date().toISOString() }).eq('id', id).select('*').single()
-    if (error) setAnalysisMessage(errorText(error, 'Could not apply suggestions.'))
+    if (error) setAnalysisMessage(errorText(error, 'Saran belum dapat diterapkan.'))
     else { setItem(data); setAnalysis(null); setAnalysisApplied(true); setAnalysisMessage('Saran terpilih diterapkan. Periksa kembali data barang sebelum melanjutkan.') }
     setAnalysisBusy(false)
   }
   async function saveListing(event) {
     event.preventDefault(); const form = editingListing
     if (!form) return
-    if (form.listing_url && !safeHttpUrl(form.listing_url)) { setMessage('Listing URL must use http:// or https://.'); return }
+    if (form.listing_url && !safeHttpUrl(form.listing_url)) { setMessage('URL listing harus diawali http:// atau https://.'); return }
     const { error } = await supabase.from('marketplace_listings').upsert({ product_id: id, marketplace: form.marketplace, listing_status: form.listing_status, listing_url: form.listing_url ? safeHttpUrl(form.listing_url) : null, listed_price: Number(form.listed_price || 0), listed_at: form.listed_at || (form.listing_status === 'LISTED' ? new Date().toISOString() : null), last_updated: new Date().toISOString() }, { onConflict: 'product_id,marketplace' })
     if (error) setMessage(errorText(error)); else { setEditingListing(null); load() }
   }
@@ -526,7 +527,7 @@ function InventoryDetail({ id }) {
     event.preventDefault(); const form = new FormData(event.currentTarget); const values = Object.fromEntries(form.entries())
     const profit = calculateProfit({ salePrice: values.sale_price, purchasePrice: item.purchase_price, marketplaceFee: values.marketplace_fee, paymentFee: values.payment_fee, shippingSubsidy: values.shipping_subsidy, otherCost: values.other_cost })
     const { error } = await supabase.rpc('mark_product_sold', { p_product_id: id, p_sold_via: values.sold_via, p_sale_price: Number(values.sale_price || 0), p_marketplace_fee: Number(values.marketplace_fee || 0), p_payment_fee: Number(values.payment_fee || 0), p_shipping_subsidy: Number(values.shipping_subsidy || 0), p_other_cost: Number(values.other_cost || 0), p_notes: values.notes || null })
-    if (error) setMessage(errorText(error, 'Could not mark this item sold.')); else { setShowSold(false); setMessage(`Sold recorded. Gross profit ${moneyIdr(profit.grossProfit)}, net profit ${moneyIdr(profit.netProfit)}.`); load() }
+    if (error) setMessage(errorText(error, 'Penjualan belum dapat dicatat.')); else { setShowSold(false); setMessage(`Penjualan tercatat. Laba kotor ${moneyIdr(profit.grossProfit)}, laba bersih ${moneyIdr(profit.netProfit)}.`); load() }
   }
   if (!item) return message ? <div className="seller-empty"><strong>{message}</strong><button className="seller-secondary" onClick={() => go('/seller/inventory')}>← Kembali ke Barang</button></div> : <SellerLoading text="Memuat barang…" />
   const isSold = String(item.status || '').toLowerCase() === 'sold'
@@ -545,13 +546,13 @@ function InventoryDetail({ id }) {
     <header className="product-workspace-header">
       <a className="product-back-link" href="/seller/inventory" onClick={(event) => { event.preventDefault(); go('/seller/inventory') }}>← Barang</a>
       <div className="product-heading-row">
-        <div className="product-heading-copy"><span className="seller-kicker">BARANG / {item.sku || 'SKU pending'}</span><h1 id="product-workspace-title">{productDisplayTitle(item)}</h1><p>{productDetailSubtitle(item)}</p></div>
-        <span className={`inventory-status large ${String(item.status || '').toLowerCase()}`}>{titleCaseStatus(item.status)}</span>
+        <div className="product-heading-copy"><span className="seller-kicker">BARANG / {item.sku || 'SKU belum tersedia'}</span><h1 id="product-workspace-title">{productDisplayTitle(item)}</h1><p>{productDetailSubtitle(item)}</p></div>
+        <span className={`inventory-status large ${String(item.status || '').toLowerCase()}`}>{inventoryStatusLabel(item.status)}</span>
       </div>
       <div className="product-action-bar">{primaryButton}<button type="button" className="seller-secondary product-secondary-action" onClick={analyzeItem} aria-disabled={!AI_ENABLED}>{analysisBusy ? 'Sedang menganalisis…' : '✦ Cek dengan AI'}</button></div>
     </header>
 
-    {message && <Notice tone={message.startsWith('Sold recorded') ? 'success' : 'warning'}>{message}</Notice>}
+    {message && <Notice tone={message.startsWith('Penjualan tercatat') ? 'success' : 'warning'}>{message}</Notice>}
     {analysisMessage && <Notice tone="info">{analysisMessage}</Notice>}
     {isSold && activeListings.length > 0 && <Notice tone="warning">Barang ini sudah terjual. Periksa listing marketplace berikut secara manual: {activeListings.map((listing) => marketplaceStatusLabel(listing.marketplace)).join(', ')}. Listing tidak dihapus otomatis.</Notice>}
 
@@ -596,7 +597,7 @@ function ProductSummaryTab({ item, analysis, analysisApplied, onEdit, onReviewAn
       </section>
       <section className="seller-panel product-ai-summary"><PanelTitle eyebrow="ANALISIS BARANG" title="Cek dengan AI" />
         <span className={`product-ai-state ${analysis ? 'complete' : 'empty'}`}>{analysis ? (analysisApplied ? 'Saran terakhir sudah diterapkan' : 'Analisis tersedia untuk ditinjau') : 'Belum dianalisis di sesi ini'}</span>
-        {analysis && <><div className="product-ai-highlights">{aiBrand && <p><span>Merek</span><strong>{aiBrand}</strong></p>}{aiTitle && <p><span>Judul</span><strong>{aiTitle}</strong></p>}{conditionSummary && <p><span>Kondisi</span><strong>{conditionSummary}</strong></p>}{aiDefects && <p><span>Defect terlihat</span><strong>{aiDefects}</strong></p>}</div><p className="product-authenticity-note">{result.authenticity_note || 'Keaslian belum diverifikasi. Perlu pemeriksaan manual.'}</p>{!analysisApplied && <button type="button" className="seller-secondary product-review-ai" onClick={onReviewAnalysis}>Tinjau saran AI</button>}</>}
+        {analysis && <><div className="product-ai-highlights">{aiBrand && <p><span>Merek</span><strong>{aiBrand}</strong></p>}{aiTitle && <p><span>Judul</span><strong>{aiTitle}</strong></p>}{conditionSummary && <p><span>Kondisi</span><strong>{conditionSummary}</strong></p>}{aiDefects && <p><span>Kekurangan terlihat</span><strong>{aiDefects}</strong></p>}</div><p className="product-authenticity-note">{result.authenticity_note || 'Keaslian belum diverifikasi. Perlu pemeriksaan manual.'}</p>{!analysisApplied && <button type="button" className="seller-secondary product-review-ai" onClick={onReviewAnalysis}>Tinjau saran AI</button>}</>}
         {!analysis && <p className="seller-muted">AI hanya berjalan saat tombol “Cek dengan AI” ditekan. Membuka atau mengganti tab tidak memanggil AI.</p>}
       </section>
     </div>
@@ -690,12 +691,12 @@ function EditInventory({ id }) {
   const [form, setForm] = useState(null); const [message, setMessage] = useState(''); const [busy, setBusy] = useState(false)
   useEffect(() => { async function load() { const { data, error } = await supabase.from('products').select('*').eq('id', id).single(); if (error) setMessage(errorText(error)); else setForm(data) }; load() }, [id])
   function set(key, value) { setForm((current) => ({ ...current, [key]: value })) }
-  async function save(event) { event.preventDefault(); setBusy(true); const payload = { brand: form.brand, name: form.name, category: form.category || null, subcategory: form.subcategory || null, size_label: form.size_label || null, condition: form.condition || 'Good', condition_notes: form.condition_notes || null, defects: form.defects || null, purchase_price: Number(form.purchase_price || 0), suggested_price: Number(form.suggested_price || 0), minimum_price: Number(form.minimum_price || 0), price_idr: Number(form.suggested_price || 0), source: form.source || null, source_url: form.source_url ? safeHttpUrl(form.source_url) : null, purchase_date: form.purchase_date || null, description: form.description || null, status: form.status, is_published: Boolean(form.is_published), updated_at: new Date().toISOString() }; if (form.source_url && !payload.source_url) { setMessage('Source URL must use http:// or https://.'); setBusy(false); return }; const { error } = await supabase.from('products').update(payload).eq('id', id); if (error) setMessage(errorText(error)); else go(`/seller/inventory/${id}`); setBusy(false) }
-  if (!form) return message ? <Notice tone="error">{message}</Notice> : <SellerLoading text="Loading item…" />
-  return <div><a className="seller-back-link" href={`/seller/inventory/${id}`} onClick={(event) => { event.preventDefault(); go(`/seller/inventory/${id}`) }}>← Back to item</a><SellerHeader eyebrow={`${form.sku || 'SKU pending'} / EDIT`} title="Edit inventory" copy="Update the master record. SKU and existing photos are preserved." /><form className="seller-panel seller-form" onSubmit={save}><div className="seller-fields two"><Field label="Brand" value={form.brand || ''} onChange={(value) => set('brand', value)} required /><Field label="Item name" value={form.name || ''} onChange={(value) => set('name', value)} required /><Field label="Category" value={form.category || ''} onChange={(value) => set('category', value)} /><Field label="Subcategory" value={form.subcategory || ''} onChange={(value) => set('subcategory', value)} /><Field label="Size" value={form.size_label || ''} onChange={(value) => set('size_label', value)} /><Field label="Condition" value={form.condition || ''} onChange={(value) => set('condition', value)} /><Field label="Condition notes" value={form.condition_notes || ''} onChange={(value) => set('condition_notes', value)} /><Field label="Defects / minus" value={form.defects || ''} onChange={(value) => set('defects', value)} /><Field label="Purchase price" value={form.purchase_price || ''} onChange={(value) => set('purchase_price', value)} type="number" /><Field label="Suggested price" value={form.suggested_price || form.price_idr || ''} onChange={(value) => set('suggested_price', value)} type="number" /><Field label="Minimum price" value={form.minimum_price || ''} onChange={(value) => set('minimum_price', value)} type="number" /><Field label="Source" value={form.source || ''} onChange={(value) => set('source', value)} /><Field label="Source URL" value={form.source_url || ''} onChange={(value) => set('source_url', value)} /><Field label="Purchase date" value={form.purchase_date || ''} onChange={(value) => set('purchase_date', value)} type="date" /><label>Status<select value={form.status} onChange={(event) => set('status', event.target.value)}>{INVENTORY_STATUSES.map((status) => <option key={status} value={status}>{titleCaseStatus(status)}</option>)}</select></label><Field label="Description" value={form.description || ''} onChange={(value) => set('description', value)} textarea /></div><label className="check-field"><input type="checkbox" checked={Boolean(form.is_published)} onChange={(event) => set('is_published', event.target.checked)} /> Show on public storefront</label>{message && <Notice tone="error">{message}</Notice>}<div className="seller-form-actions"><button className="seller-primary" disabled={busy}>{busy ? 'Saving…' : 'Save changes →'}</button><button type="button" className="seller-secondary" onClick={() => go(`/seller/inventory/${id}`)}>Cancel</button></div></form></div>
+  async function save(event) { event.preventDefault(); setBusy(true); const payload = { brand: form.brand, name: form.name, category: form.category || null, subcategory: form.subcategory || null, size_label: form.size_label || null, condition: form.condition || 'Good', condition_notes: form.condition_notes || null, defects: form.defects || null, purchase_price: Number(form.purchase_price || 0), suggested_price: Number(form.suggested_price || 0), minimum_price: Number(form.minimum_price || 0), price_idr: Number(form.suggested_price || 0), source: form.source || null, source_url: form.source_url ? safeHttpUrl(form.source_url) : null, purchase_date: form.purchase_date || null, description: form.description || null, status: form.status, is_published: Boolean(form.is_published), updated_at: new Date().toISOString() }; if (form.source_url && !payload.source_url) { setMessage('Tautan sumber harus diawali http:// atau https://.'); setBusy(false); return }; const { error } = await supabase.from('products').update(payload).eq('id', id); if (error) setMessage(errorText(error)); else go(`/seller/inventory/${id}`); setBusy(false) }
+  if (!form) return message ? <Notice tone="error">{message}</Notice> : <SellerLoading text="Memuat barang…" />
+  return <div><a className="seller-back-link" href={`/seller/inventory/${id}`} onClick={(event) => { event.preventDefault(); go(`/seller/inventory/${id}`) }}>← Kembali ke barang</a><SellerHeader eyebrow={`${form.sku || 'SKU belum tersedia'} / EDIT`} title="Edit barang" copy="Perbarui data barang. SKU dan foto yang sudah ada akan tetap dipertahankan." /><form className="seller-panel seller-form" onSubmit={save}><div className="seller-fields two"><Field label="Merek" value={form.brand || ''} onChange={(value) => set('brand', value)} required /><Field label="Nama barang" value={form.name || ''} onChange={(value) => set('name', value)} required /><Field label="Kategori" value={form.category || ''} onChange={(value) => set('category', value)} /><Field label="Subkategori" value={form.subcategory || ''} onChange={(value) => set('subcategory', value)} /><Field label="Ukuran" value={form.size_label || ''} onChange={(value) => set('size_label', value)} /><Field label="Kondisi" value={form.condition || ''} onChange={(value) => set('condition', value)} /><Field label="Catatan kondisi" value={form.condition_notes || ''} onChange={(value) => set('condition_notes', value)} /><Field label="Kekurangan / minus" value={form.defects || ''} onChange={(value) => set('defects', value)} /><Field label="Modal pembelian" value={form.purchase_price || ''} onChange={(value) => set('purchase_price', value)} type="number" /><Field label="Harga jual disarankan" value={form.suggested_price || form.price_idr || ''} onChange={(value) => set('suggested_price', value)} type="number" /><Field label="Harga minimum" value={form.minimum_price || ''} onChange={(value) => set('minimum_price', value)} type="number" /><Field label="Sumber" value={form.source || ''} onChange={(value) => set('source', value)} /><Field label="Tautan sumber" value={form.source_url || ''} onChange={(value) => set('source_url', value)} /><Field label="Tanggal pembelian" value={form.purchase_date || ''} onChange={(value) => set('purchase_date', value)} type="date" /><label>Status<select value={form.status} onChange={(event) => set('status', event.target.value)}>{INVENTORY_STATUSES.map((status) => <option key={status} value={status}>{inventoryStatusLabel(status)}</option>)}</select></label><Field label="Deskripsi" value={form.description || ''} onChange={(value) => set('description', value)} textarea /></div><label className="check-field"><input type="checkbox" checked={Boolean(form.is_published)} onChange={(event) => set('is_published', event.target.checked)} /> Tampilkan di etalase publik</label>{message && <Notice tone="error">{message}</Notice>}<div className="seller-form-actions"><button className="seller-primary" disabled={busy}>{busy ? 'Menyimpan…' : 'Simpan perubahan →'}</button><button type="button" className="seller-secondary" onClick={() => go(`/seller/inventory/${id}`)}>Batal</button></div></form></div>
 }
 
-function ListingRow({ listing, label, onEdit }) { return <div className="listing-row"><div><strong>{label}</strong><span>{listing.listing_url ? 'URL saved' : 'No listing URL'}</span></div><div><b className={`listing-status ${listing.listing_status.toLowerCase()}`}>{titleCaseStatus(listing.listing_status)}</b><small>{listing.listed_price ? moneyIdr(listing.listed_price) : '—'}</small></div><button type="button" onClick={onEdit}>Edit</button></div> }
+function ListingRow({ listing, label, onEdit }) { return <div className="listing-row"><div><strong>{label}</strong><span>{listing.listing_url ? 'URL tersimpan' : 'URL belum dicatat'}</span></div><div><b className={`listing-status ${listing.listing_status.toLowerCase()}`}>{marketplaceStatusLabel(listing.listing_status)}</b><small>{listing.listed_price ? moneyIdr(listing.listed_price) : '—'}</small></div><button type="button" onClick={onEdit}>Ubah</button></div> }
 
 function SourcingPage({ embedded = false, onOpenProduct = () => {}, onOpenResearch = () => {} }) {
   const [items, setItems] = useState([])
@@ -758,17 +759,17 @@ function SourcingPage({ embedded = false, onOpenProduct = () => {}, onOpenResear
     if (!sourcingCandidateCanMoveToInventory(candidate) || movingId) return
     const purchasePrice = Number(purchasePrices[candidate.id] || candidate.seller_asking_price || 0)
     if (!purchasePrice) {
-      setMessage('Masukkan harga beli final sebelum memasukkan barang ke inventory.')
+      setMessage('Masukkan harga beli final sebelum memindahkan temuan ke Barang.')
       setMessageTone('error')
       return
     }
     setMovingId(candidate.id)
     const { data, error } = await supabase.rpc('convert_sourcing_to_inventory', { p_candidate_id: candidate.id, p_purchase_price: purchasePrice })
-    if (error) { setMessage(errorText(error, 'Barang belum bisa dipindahkan ke inventory.')); setMessageTone('error') }
+    if (error) { setMessage(errorText(error, 'Temuan belum bisa dipindahkan ke Barang.')); setMessageTone('error') }
     else if (!data) { setMessage('Konversi tidak mengembalikan detail barang. Temuan tetap tersimpan; periksa status sebelum mencoba lagi.'); setMessageTone('error') }
     else {
       setItems((current) => current.map((item) => item.id === candidate.id ? { ...item, status: 'BOUGHT', product_id: data } : item))
-      setMessage('Barang sudah masuk ke Inventory. Buka barang dari kartu temuan ini.')
+      setMessage('Temuan berhasil dipindahkan ke Barang. Buka detailnya dari kartu temuan ini.')
       setMessageTone('success')
       await load()
     }
@@ -818,7 +819,7 @@ function SourcingPage({ embedded = false, onOpenProduct = () => {}, onOpenResear
             <label className="sourcing-status-control"><span className="sr-only">Status temuan {candidate.title}</span><select aria-label={`Status temuan ${candidate.title}`} value={candidate.status} disabled={converted || Boolean(movingId)} onChange={(event) => void updateStatus(candidate, event.target.value)}>{SOURCING_CANDIDATE_STATUSES.map((status) => <option key={status} value={status}>{sourcingCandidateStatusLabel(status)}</option>)}</select></label>
           </div>
           {candidate.notes && <details className="sourcing-card-notes"><summary>Alasan & catatan inspeksi</summary><p>{candidate.notes}</p></details>}
-          {converted && <div className="sourcing-converted" role="status"><span>✓ Barang sudah masuk ke Inventory</span><button type="button" className="seller-secondary compact" onClick={() => onOpenProduct(candidate.product_id)}>Buka barang →</button></div>}
+          {converted && <div className="sourcing-converted" role="status"><span>✓ Sudah masuk ke Barang</span><button type="button" className="seller-secondary compact" onClick={() => onOpenProduct(candidate.product_id)}>Buka barang →</button></div>}
           {canMove && <div className="move-inventory"><label><span>Harga beli final</span><input type="number" min="1" inputMode="numeric" value={purchasePrices[candidate.id] || candidate.seller_asking_price || ''} onChange={(event) => setPurchasePrices({ ...purchasePrices, [candidate.id]: event.target.value })} placeholder="Masukkan modal akhir" /></label><button type="button" className="seller-primary compact" disabled={Boolean(movingId)} aria-busy={movingId === candidate.id} onClick={() => void moveToInventory(candidate)}>{movingId === candidate.id ? 'Memasukkan…' : 'Masukkan ke Barang →'}</button></div>}
         </article>
       })}
@@ -891,7 +892,7 @@ function ListingsPage({ onOpenProduct }) {
             {needsReview && <p className="listing-active-warning" role="alert">Barang sudah terjual, tetapi masih ada listing marketplace yang perlu dicek.</p>}
             <div className="listing-actions">
               <button type="button" className="listing-action-link" onClick={() => onOpenProduct(product.id)}>Buka barang <span aria-hidden="true">→</span></button>
-              {!listing.isVirtual && <button type="button" className="listing-action-link" aria-label={`Edit listing ${marketplaceLabel} untuk ${productTitle}`} onClick={() => { setMessage(null); setEditingListing({ ...listing }) }}>Edit status / harga / URL</button>}
+              {!listing.isVirtual && <button type="button" className="listing-action-link" aria-label={`Ubah listing ${marketplaceLabel} untuk ${productTitle}`} onClick={() => { setMessage(null); setEditingListing({ ...listing }) }}>Ubah status / harga / URL</button>}
               {safeUrl && <a className="listing-action-link" href={safeUrl} target="_blank" rel="noreferrer">Buka listing <span aria-hidden="true">↗</span></a>}
             </div>
           </div>

@@ -10,6 +10,17 @@ export const MARKETPLACES = [
 export const INVENTORY_STATUSES = ['draft', 'available', 'reserved', 'sold', 'archived']
 export const LISTING_STATUSES = ['NOT_LISTED', 'DRAFT', 'LISTED', 'SOLD', 'REMOVED']
 
+export function inventoryStatusLabel(status = '') {
+  const labels = {
+    DRAFT: 'Draf',
+    AVAILABLE: 'Tersedia',
+    RESERVED: 'Dipesan',
+    SOLD: 'Terjual',
+    ARCHIVED: 'Diarsipkan',
+  }
+  return labels[String(status).toUpperCase()] || titleCaseStatus(status)
+}
+
 export const PRODUCT_DETAIL_TABS = [
   { id: 'summary', label: 'Ringkas' },
   { id: 'marketplace', label: 'Marketplace' },
@@ -87,9 +98,7 @@ export const ITEM_ANALYSIS_SUGGESTIONS = [
 ]
 
 export const SELLER_WORKSPACE_GROUPS = [
-  { label: 'OPERASIONAL', links: [['/seller', 'Beranda', '⌂'], ['/seller/inventory', 'Barang', '▣']] },
-  { label: 'HUNTING', links: [['/seller/ai-hunter', 'Hunting', '✦']] },
-  { label: 'JUALAN', links: [['/seller/listings', 'Listing', '↗'], ['/seller/sales', 'Terjual', '◎']] },
+  { label: 'OPERASIONAL', links: [['/seller', 'Beranda', '⌂'], ['/seller/inventory', 'Barang', '▣'], ['/seller/ai-hunter', 'Hunting', '✦'], ['/seller/listings', 'Jualan', '↗']] },
 ]
 
 export const ADMIN_WORKSPACE_GROUPS = [
