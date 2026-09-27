@@ -94,8 +94,21 @@ export const SELLER_WORKSPACE_GROUPS = [
 
 export const ADMIN_WORKSPACE_GROUPS = [
   ...SELLER_WORKSPACE_GROUPS,
-  { label: 'INSIGHT', links: [['/seller/analytics', 'Ringkasan bisnis', '▤'], ['/seller/hunter-analytics', 'Hunter', '⌕'], ['/seller/ai-usage', 'Penggunaan AI', '◒']] },
-  { label: 'PENGATURAN', links: [['/seller/settings', 'AI & Anggaran', '⚙']] },
+  { label: 'INSIGHT', links: [['/seller/analytics', 'Insight', '▤']] },
+  { label: 'PENGATURAN', links: [['/seller/settings', 'Pengaturan', '⚙']] },
+]
+
+export const ADMIN_INSIGHT_TABS = [
+  { id: 'business', href: '/seller/analytics', label: 'Ringkasan bisnis' },
+  { id: 'hunter', href: '/seller/hunter-analytics', label: 'Hunter' },
+  { id: 'ai-usage', href: '/seller/ai-usage', label: 'Penggunaan AI' },
+]
+
+export const ADMIN_SETTINGS_TABS = [
+  { id: 'users', href: '/seller/users-roles', label: 'Pengguna & Peran', unavailable: true },
+  { id: 'marketplaces', href: '/seller/marketplace-settings', label: 'Marketplace', unavailable: true },
+  { id: 'ai-budget', href: '/seller/settings', label: 'AI & Anggaran' },
+  { id: 'app', href: '/seller/app-settings', label: 'Aplikasi', unavailable: true },
 ]
 
 export const SELLER_MOBILE_PRIMARY_LINKS = [
@@ -107,6 +120,11 @@ export const SELLER_MOBILE_PRIMARY_LINKS = [
 
 export const SELLER_MOBILE_MORE_GROUPS = [
   { label: 'JUALAN', links: [['/seller/sales', 'Terjual', '◎']] },
+]
+
+export const ADMIN_MOBILE_MORE_GROUPS = [
+  ...SELLER_MOBILE_MORE_GROUPS,
+  { label: 'ADMIN', links: [['/seller/analytics', 'Insight', '▤'], ['/seller/settings', 'Pengaturan', '⚙']] },
 ]
 
 export const SOURCING_CANDIDATE_STATUSES = ['WATCHING', 'CHECK', 'NEGOTIATING', 'BOUGHT', 'SKIPPED']
@@ -130,7 +148,7 @@ export function workspaceNavigationGroupsForRole(role) {
 
 export function workspaceMobileMoreGroupsForRole(role) {
   return String(role || '').toUpperCase() === 'ADMIN'
-    ? [...SELLER_MOBILE_MORE_GROUPS, ...ADMIN_WORKSPACE_GROUPS.slice(SELLER_WORKSPACE_GROUPS.length)]
+    ? ADMIN_MOBILE_MORE_GROUPS
     : SELLER_MOBILE_MORE_GROUPS
 }
 
@@ -139,7 +157,17 @@ export function workspacePathIsActive(path, href) {
   if (href === '/seller/inventory') return path.startsWith(href)
   if (href === '/seller/ai-hunter') return path === href || path === '/seller/sourcing'
   if (href === '/seller/listings') return path === href || path === '/seller/sales'
+  if (href === '/seller/analytics') return ADMIN_INSIGHT_TABS.some((tab) => path === tab.href)
+  if (href === '/seller/settings') return ADMIN_SETTINGS_TABS.some((tab) => path === tab.href)
   return path === href || path.startsWith(`${href}/`)
+}
+
+export function adminInsightTabForPath(path) {
+  return ADMIN_INSIGHT_TABS.find((tab) => tab.href === path)?.id || 'business'
+}
+
+export function adminSettingsTabForPath(path) {
+  return ADMIN_SETTINGS_TABS.find((tab) => tab.href === path)?.id || 'ai-budget'
 }
 
 export function jualanTabForPath(path) {

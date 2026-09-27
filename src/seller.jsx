@@ -4,6 +4,10 @@ import { AI_ENABLED, supabase } from './supabase-client'
 import ListingGenerator from './listing-generator'
 import './product-detail.css'
 import {
+  ADMIN_INSIGHT_TABS,
+  ADMIN_SETTINGS_TABS,
+  adminInsightTabForPath,
+  adminSettingsTabForPath,
   budgetLabel,
   budgetTone,
   calculateProfit,
@@ -148,20 +152,14 @@ function SellerWorkspace({ path, profile, onLogout }) {
   }, [path, profile.role])
   let page = <SellerDashboard profile={profile} />
   if (!canAccessWorkspaceSection(profile.role, section)) page = <AccessDenied />
-  else if (section === 'analytics') page = <SellerDashboard profile={profile} analytics />
+  else if (['analytics', 'hunter-analytics', 'ai-usage'].includes(section) && profile.role === 'ADMIN') page = <AdminInsightWorkspace path={workspacePath} />
+  else if (['settings', 'users-roles', 'marketplace-settings', 'app-settings'].includes(section) && profile.role === 'ADMIN') page = <AdminSettingsWorkspace path={workspacePath} />
   if (section === 'inventory' && id === 'new') page = <NewInventory />
   else if (section === 'inventory' && id && subSection === 'edit') page = <EditInventory id={id} />
   else if (section === 'inventory' && id) page = <InventoryDetail id={id} />
   else if (section === 'inventory') page = <InventoryPage />
   else if (section === 'ai-hunter' || section === 'sourcing') page = <HuntingWorkspace path={workspacePath} />
-  else if (section === 'hunter-analytics' && profile.role === 'ADMIN') page = <HunterAnalyticsPage />
   else if (section === 'listings' || section === 'sales') page = <JualanWorkspace path={workspacePath} />
-  else if (section === 'ai-usage' && profile.role === 'ADMIN') page = <AIUsagePage />
-  else if (section === 'settings' && profile.role === 'ADMIN') page = <SettingsPage />
-  else if (['users-roles', 'marketplace-settings', 'app-settings'].includes(section) && profile.role === 'ADMIN') {
-    const titles = { 'users-roles': 'Users / Roles', 'marketplace-settings': 'Marketplace Settings', 'app-settings': 'App Settings' }
-    page = <ComingSoonPage title={titles[section]} />
-  }
   if (path === '/admin' && profile.role !== 'ADMIN') page = <AccessDenied />
   return <main className="seller-app"><SellerSidebar path={workspacePath} profile={profile} onLogout={onLogout} /><section className="seller-content">{page}</section><SellerMobileNav path={workspacePath} profile={profile} onLogout={onLogout} /></main>
 }
@@ -218,6 +216,32 @@ function JualanWorkspace({ path }) {
   </div>
 }
 
+function AdminWorkspaceShell({ title, description, tabs, activeTab, children }) {
+  return <div className="admin-workspace">
+    <header className="admin-workspace-heading"><div><span className="seller-kicker">ADMIN WORKSPACE</span><h1>{title}</h1><p>{description}</p></div></header>
+    <nav className="admin-workspace-tabs" aria-label={title}>
+      {tabs.map((tab) => <a key={tab.id} href={tab.href} aria-current={activeTab === tab.id ? 'page' : undefined} className={activeTab === tab.id ? 'active' : ''} onClick={(event) => { event.preventDefault(); go(tab.href) }}>
+        <span>{tab.label}</span>{tab.unavailable && <small>Belum tersedia</small>}
+      </a>)}
+    </nav>
+    <section className="admin-workspace-panel">{children}</section>
+  </div>
+}
+
+function AdminInsightWorkspace({ path }) {
+  const activeTab = adminInsightTabForPath(path)
+  const page = activeTab === 'hunter' ? <HunterAnalyticsPage /> : activeTab === 'ai-usage' ? <AIUsagePage /> : <SellerDashboard analytics />
+  return <AdminWorkspaceShell title="Insight" description="Ringkasan bisnis, performa Hunter, dan penggunaan AI." tabs={ADMIN_INSIGHT_TABS} activeTab={activeTab}>{page}</AdminWorkspaceShell>
+}
+
+function AdminSettingsWorkspace({ path }) {
+  const activeTab = adminSettingsTabForPath(path)
+  const page = activeTab === 'ai-budget'
+    ? <SettingsPage />
+    : <ComingSoonPage title={ADMIN_SETTINGS_TABS.find((tab) => tab.id === activeTab)?.label || 'Pengaturan'} />
+  return <AdminWorkspaceShell title="Pengaturan" description="Kelola kontrol yang sudah tersedia; bagian lain ditandai jelas bila belum aktif." tabs={ADMIN_SETTINGS_TABS} activeTab={activeTab}>{page}</AdminWorkspaceShell>
+}
+
 function SellerSidebar({ path, profile, onLogout }) {
   const groups = workspaceNavigationGroupsForRole(profile.role)
   return <aside className="seller-sidebar">
@@ -235,11 +259,11 @@ function SellerSidebar({ path, profile, onLogout }) {
 function SellerMobileNav({ path, profile, onLogout }) {
   const [moreOpen, setMoreOpen] = useState(false)
   const moreGroups = workspaceMobileMoreGroupsForRole(profile.role)
-  const adminMoreLinks = profile.role === 'ADMIN' ? moreGroups.slice(2).flatMap(({ links }) => links) : []
+  const adminMoreLinks = profile.role === 'ADMIN' ? moreGroups.slice(1).flatMap(({ links }) => links) : []
   function navigate(href) { setMoreOpen(false); go(href) }
   return <>
     {moreOpen && <div className="seller-more-sheet" role="dialog" aria-label="Lainnya">
-      <div className="seller-more-head"><div><strong>Lainnya</strong><small>{profile.email || (profile.role === 'ADMIN' ? 'Administrator' : 'Akun seller')}</small></div><button type="button" aria-label="Tutup menu lainnya" onClick={() => setMoreOpen(false)}>×</button></div>
+      <div className="seller-more-head"><div><strong>Lainnya</strong><small>{profile.email || (profile.role === 'ADMIN' ? 'Administrator' : 'Akun seller')}</small><span className="role-pill">{profile.role === 'ADMIN' ? 'ADMIN' : 'SELLER'}</span></div><button type="button" aria-label="Tutup menu lainnya" onClick={() => setMoreOpen(false)}>×</button></div>
       {moreGroups.map((group) => <section className="seller-more-group" key={group.label}><span>{group.label}</span>{group.links.map(([href, label, icon]) => <a key={href} href={href} className={workspacePathIsActive(path, href) ? 'active' : ''} onClick={(event) => { event.preventDefault(); navigate(href) }}><i>{icon}</i><span>{label}</span></a>)}</section>)}
       <button type="button" className="seller-more-logout" onClick={onLogout}>↪ Keluar</button>
     </div>}
@@ -255,39 +279,91 @@ function SellerHeader({ eyebrow, title, copy, action }) {
 }
 
 function SellerLoading({ text }) { return <main className="seller-loading"><span className="seller-spinner" /><p>{text}</p></main> }
-function Notice({ children, tone = 'info' }) { return <div className={`seller-notice ${tone}`}>{children}</div> }
-function AccessDenied() { return <div className="seller-empty"><strong>ADMIN ACCESS REQUIRED</strong><p>This area is limited to ADMIN accounts.</p></div> }
-function ComingSoonPage({ title }) { return <div><SellerHeader eyebrow="ADMIN / MANAGEMENT" title={title} copy="Fondasi pengelolaan ini belum tersedia. Tidak ada perubahan yang dilakukan di sini." /><section className="seller-panel"><span className="seller-kicker">COMING SOON / BELUM TERSEDIA</span><h2 className="coming-soon-title">Belum tersedia</h2><p className="seller-muted">Backend dan kontrol akses untuk halaman ini belum disiapkan. Halaman ini hanya penanda status, bukan fitur yang berfungsi.</p></section></div> }
+function Notice({ children, tone = 'info', role }) { return <div className={`seller-notice ${tone}`} role={role}>{children}</div> }
+function AccessDenied() { return <div className="seller-empty"><strong>AKSES ADMIN DIPERLUKAN</strong><p>Bagian ini hanya tersedia untuk akun ADMIN.</p></div> }
+function ComingSoonPage({ title }) { return <div><SellerHeader eyebrow="PENGATURAN ADMIN" title={title} copy="Bagian ini belum aktif. Fitur tidak dapat digunakan dari halaman ini." /><section className="seller-panel"><span className="seller-kicker">STATUS FITUR</span><h2 className="coming-soon-title">Belum tersedia</h2><p className="seller-muted">Kontrol untuk bagian ini belum disiapkan. Tautan lama tetap tersedia agar bookmark tidak rusak.</p></section></div> }
 
 function SellerDashboard({ profile, analytics = false }) {
   const [summary, setSummary] = useState(null)
-  const [ai, setAi] = useState(null)
-  const [watchlist, setWatchlist] = useState([])
+  const [draftListings, setDraftListings] = useState([])
+  const [draftListingCount, setDraftListingCount] = useState(0)
+  const [boughtCandidates, setBoughtCandidates] = useState([])
+  const [boughtCandidateCount, setBoughtCandidateCount] = useState(0)
+  const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState('')
 
   useEffect(() => {
     async function load() {
-      if (!supabase) return
-      const [{ data: dashboard, error: dashboardError }, { data: usage }, { data: sourcing }] = await Promise.all([
+      if (!supabase) { setLoading(false); return }
+      const followUpQueries = analytics ? [] : [
+        supabase.from('marketplace_listings')
+          .select('id,product_id,marketplace,listing_status,listed_price,products!inner(id,sku,name,brand,status)', { count: 'exact' })
+          .eq('listing_status', 'DRAFT').order('last_updated', { ascending: false }).limit(3),
+        supabase.from('sourcing_candidates')
+          .select('id,title,brand,source_platform,product_id,status,created_at', { count: 'exact' })
+          .eq('status', 'BOUGHT').is('product_id', null).order('created_at', { ascending: false }).limit(3),
+      ]
+      const [dashboardResult, listingsResult, candidatesResult] = await Promise.all([
         supabase.rpc('seller_dashboard_summary'),
-        supabase.rpc('seller_ai_usage_summary'),
-        supabase.from('sourcing_candidates').select('*').in('status', ['WATCHING', 'CHECK', 'NEGOTIATING']).order('created_at', { ascending: false }).limit(4),
+        ...followUpQueries,
       ])
-      if (dashboardError) setMessage(errorText(dashboardError, 'Apply the seller panel migration to load live data.'))
-      setSummary(dashboard || null); setAi(usage || null); setWatchlist(sourcing || [])
+      const notices = []
+      if (dashboardResult.error) notices.push(errorText(dashboardResult.error, 'Ringkasan bisnis belum dapat dimuat.'))
+      else setSummary(dashboardResult.data || null)
+      if (!analytics) {
+        if (listingsResult?.error) notices.push('Sebagian tindak lanjut listing belum dapat dimuat.')
+        else {
+          setDraftListings(listingsResult?.data || [])
+          setDraftListingCount(listingsResult?.count ?? listingsResult?.data?.length ?? 0)
+        }
+        if (candidatesResult?.error) notices.push('Sebagian temuan tersimpan belum dapat dimuat.')
+        else {
+          setBoughtCandidates(candidatesResult?.data || [])
+          setBoughtCandidateCount(candidatesResult?.count ?? candidatesResult?.data?.length ?? 0)
+        }
+      }
+      setMessage(notices.join(' '))
+      setLoading(false)
     }
     load()
-  }, [])
+  }, [analytics])
 
-  const stats = summary || { total_stock: 0, available: 0, draft: 0, reserved: 0, sold: 0, total_modal_active: 0, estimated_stock_value: 0, revenue: 0, gross_profit: 0, net_profit: 0 }
-  const tone = budgetTone(ai?.used || 0, ai?.budget || 0)
-  return <div><SellerHeader eyebrow={analytics ? 'INSIGHT' : `${profile?.role || 'SELLER'} / OPERASIONAL`} title={analytics ? 'Ringkasan bisnis' : 'Beranda'} copy="Your master inventory is the source of truth for every channel." action={<a href="/seller/inventory/new" className="seller-primary compact" onClick={(event) => { event.preventDefault(); go('/seller/inventory/new') }}>＋ Tambah barang</a>} />{message && <Notice tone="warning">{message}</Notice>}<section className="seller-stat-grid"><Stat label="Total stock" value={stats.total_stock} /><Stat label="Available" value={stats.available} tone="green" /><Stat label="Draft" value={stats.draft} tone="muted" /><Stat label="Reserved" value={stats.reserved} tone="yellow" /><Stat label="Sold" value={stats.sold} tone="red" /></section><section className="seller-finance-grid"><Metric label="Modal active" value={moneyIdr(stats.total_modal_active)} /><Metric label="Estimated stock value" value={moneyIdr(stats.estimated_stock_value)} /><Metric label="Revenue" value={moneyIdr(stats.revenue)} /><Metric label="Gross profit" value={moneyIdr(stats.gross_profit)} /><Metric label="Net profit" value={moneyIdr(stats.net_profit)} /></section><div className="seller-two-col"><section className="seller-panel"><PanelTitle eyebrow="AI BUDGET" title="Monthly usage" href={profile?.role === 'ADMIN' ? '/seller/ai-usage' : undefined} /><div className="budget-row"><strong>{moneyIdr(ai?.used || 0)}</strong><span>of {moneyIdr(ai?.budget || 100000)}</span></div><div className="budget-track"><span className={tone} style={{ width: `${Math.min(ai?.percentage || 0, 100)}%` }} /></div><div className="budget-foot"><span className={`budget-state ${tone}`}>{budgetLabel(ai?.used || 0, ai?.budget || 100000)}</span><span>{Math.round(ai?.percentage || 0)}%</span></div>{!AI_ENABLED && <p className="muted-note">AI belum dikonfigurasi. Usage stays at zero until the server-side function is enabled.</p>}</section><section className="seller-panel"><PanelTitle eyebrow="SOURCING WATCHLIST" title="Candidates to review" href="/seller/sourcing" />{watchlist.length ? watchlist.map((candidate) => <CandidateRow key={candidate.id} candidate={candidate} />) : <p className="seller-muted">No sourcing candidates yet.</p>}</section></div></div>
+  const metric = (value, format = false) => loading ? '—' : format ? moneyIdr(value || 0) : value ?? '—'
+  if (analytics) return <div className="dashboard-page dashboard-analytics">
+    <SellerHeader eyebrow="INSIGHT / BISNIS" title="Ringkasan bisnis" copy="Pantau stok dan hasil transaksi yang tercatat." />
+    {message && <Notice tone="warning">{message}</Notice>}
+    <section className="seller-stat-grid"><Stat label="Total unit aktif" value={metric(summary?.total_stock)} /><Stat label="Tersedia" value={metric(summary?.available)} tone="green" /><Stat label="Draft" value={metric(summary?.draft)} tone="muted" /><Stat label="Dipesan" value={metric(summary?.reserved)} tone="yellow" /><Stat label="Terjual" value={metric(summary?.sold)} tone="red" /></section>
+    <section className="seller-finance-grid dashboard-finance-grid"><Metric label="Modal berjalan" value={metric(summary?.total_modal_active, true)} /><Metric label="Estimasi nilai stok" value={metric(summary?.estimated_stock_value, true)} /><Metric label="Pendapatan tercatat" value={metric(summary?.revenue, true)} /><Metric label="Laba kotor tercatat" value={metric(summary?.gross_profit, true)} /><Metric label="Laba bersih tercatat" value={metric(summary?.net_profit, true)} /></section>
+  </div>
+
+  return <div className="dashboard-page dashboard-home">
+    <SellerHeader eyebrow={`${profile?.role || 'SELLER'} / OPERASIONAL`} title="Beranda" copy="Ringkasan usaha dan langkah yang bisa ditindaklanjuti." />
+    {message && <Notice tone="warning" role="status">{message}</Notice>}
+    <section className="dashboard-quick-actions" aria-label="Aksi cepat">
+      <DashboardQuickAction href="/seller/inventory/new" icon="＋" title="Tambah barang" detail="Catat stok baru" />
+      <DashboardQuickAction href="/seller/inventory" icon="▣" title="Cek barang" detail="Buka inventory" />
+      <DashboardQuickAction href="/seller/ai-hunter" icon="✦" title="Mulai hunting" detail="Cari peluang" />
+    </section>
+    <section className="dashboard-home-stats" aria-label="Ringkasan usaha">
+      <Stat label="Barang tersedia" value={metric(summary?.available)} tone="green" />
+      <Metric label="Modal berjalan" value={metric(summary?.total_modal_active, true)} />
+      <Metric label="Laba bersih tercatat" value={metric(summary?.net_profit, true)} />
+    </section>
+    <section className="seller-panel dashboard-followups">
+      <PanelTitle eyebrow="TINDAK LANJUT" title="Yang perlu ditinjau" />
+      {loading ? <p className="seller-muted">Memuat tindak lanjut…</p> : draftListingCount || boughtCandidateCount ? <div className="dashboard-task-list">
+        {draftListingCount > 0 && <DashboardTaskCard title="Listing masih draft" count={draftListingCount} href="/seller/listings" items={draftListings.map((listing) => ({ key: listing.id, title: `${listing.products?.brand ? `${listing.products.brand} ` : ''}${listing.products?.name || 'Barang'}`, meta: `${listing.products?.sku || 'SKU'} · ${listing.marketplace || 'Marketplace'}` }))} action="Tinjau listing" />}
+        {boughtCandidateCount > 0 && <DashboardTaskCard title="Barang dibeli, belum masuk inventory" count={boughtCandidateCount} href="/seller/sourcing" items={boughtCandidates.map((candidate) => ({ key: candidate.id, title: candidate.title || candidate.brand || 'Temuan tanpa nama', meta: candidate.source_platform || 'Sumber belum dicatat' }))} action="Buka temuan" />}
+      </div> : <p className="seller-muted dashboard-no-tasks">Belum ada listing draft atau temuan yang menunggu dipindahkan ke Barang.</p>}
+    </section>
+  </div>
 }
 
 function Stat({ label, value, tone = '' }) { return <div className={`seller-stat ${tone}`}><span>{label}</span><strong>{value}</strong></div> }
 function Metric({ label, value }) { return <div className="seller-metric"><span>{label}</span><strong>{value}</strong></div> }
-function PanelTitle({ eyebrow, title, href }) { return <div className="seller-panel-title"><div><span className="seller-kicker">{eyebrow}</span><h2>{title}</h2></div>{href && <a href={href} onClick={(event) => { event.preventDefault(); go(href) }}>View all →</a>}</div> }
-function CandidateRow({ candidate }) { return <a className="candidate-row" href={`/seller/sourcing`} onClick={(event) => { event.preventDefault(); go('/seller/sourcing') }}><div><strong>{candidate.title}</strong><span>{candidate.brand || 'Brand not set'} · {candidate.source_platform || 'Unknown source'}</span></div><b className={`opportunity ${candidate.opportunity_score >= 70 ? 'high' : candidate.opportunity_score >= 40 ? 'check' : 'skip'}`}>{candidate.opportunity_score == null ? '—' : candidate.opportunity_score}</b></a> }
+function DashboardQuickAction({ href, icon, title, detail }) { return <a className="dashboard-quick-action" href={href} onClick={(event) => { event.preventDefault(); go(href) }}><i aria-hidden="true">{icon}</i><span><strong>{title}</strong><small>{detail}</small></span><b aria-hidden="true">→</b></a> }
+function DashboardTaskCard({ title, count, items, href, action }) { return <article className="dashboard-task-card"><div className="dashboard-task-head"><div><h3>{title}</h3><span>{count} item</span></div><a href={href} onClick={(event) => { event.preventDefault(); go(href) }}>{action} →</a></div>{items.length > 0 && <ul>{items.map((item) => <li key={item.key}><strong>{item.title}</strong><small>{item.meta}</small></li>)}</ul>}</article> }
+function PanelTitle({ eyebrow, title, href }) { return <div className="seller-panel-title"><div><span className="seller-kicker">{eyebrow}</span><h2>{title}</h2></div>{href && <a href={href} onClick={(event) => { event.preventDefault(); go(href) }}>Lihat semua →</a>}</div> }
 
 function InventoryPage() {
   const [items, setItems] = useState([]); const [count, setCount] = useState(0); const [filters, setFilters] = useState({ q: '', status: '', brand: '', sort: 'newest' }); const [page, setPage] = useState(0); const [message, setMessage] = useState(''); const pageSize = 20
