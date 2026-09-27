@@ -241,17 +241,20 @@ export function HunterChatPage({ embedded = false, onOpenFinds = () => {} } = {}
     const feature = decision.type === 'LOAD_CACHE' || decision.type === 'START_RESEARCH' ? 'HUNTER_DESTINATION_BRIEF'
       : decision.type === 'REFRESH_RESEARCH' ? 'HUNTER_REFRESH'
         : decision.type === 'AI_CHAT' ? 'HUNTER_CHAT' : 'HUNTER_ITEM_CHECK'
-    const requestBody = itemBody || {
-      feature,
-      session_id: sessionId,
-      message,
-      destination,
-      category_focus: categoryFocus,
-      budget_idr: budgetIdr,
-      market_goal: marketGoal,
-      active_section: activeSection,
-      selected_target_ids: focusedTargetIds.slice(0, 3),
-      ...(['LOAD_CACHE', 'START_RESEARCH', 'REFRESH_RESEARCH'].includes(decision.type) ? { research_confirmed: true } : {}),
+    const requestBody = {
+      ...(itemBody || {
+        feature,
+        session_id: sessionId,
+        message,
+        destination,
+        category_focus: categoryFocus,
+        budget_idr: budgetIdr,
+        market_goal: marketGoal,
+        active_section: activeSection,
+        selected_target_ids: focusedTargetIds.slice(0, 3),
+        ...(['LOAD_CACHE', 'START_RESEARCH', 'REFRESH_RESEARCH'].includes(decision.type) ? { research_confirmed: true } : {}),
+      }),
+      request_id: crypto.randomUUID(),
     }
     const optimisticId = `pending-${Date.now()}`
     if (message && feature !== 'HUNTER_ITEM_CHECK') setMessages((current) => [...current, { id: optimisticId, role: 'user', content: message, message_kind: 'chat', created_at: new Date().toISOString() }])
@@ -518,5 +521,6 @@ export function HunterAnalyticsPage() {
 function AnalyticsList({ title, items = [] }) {
   return <section className="hunter-analytics-card"><h2>{title}</h2>{items?.length ? items.map((item) => <div key={item.label}><span>{item.label}</span><b>{item.value ?? item.count ?? 0}</b></div>) : <p>Belum cukup data untuk insight yang valid.</p>}</section>
 }
+
 
 

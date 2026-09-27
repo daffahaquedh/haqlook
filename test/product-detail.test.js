@@ -120,7 +120,7 @@ test('tabs expose role, selected state, and a labeled tab panel', () => {
 
 test('AI Analyze remains an explicit button action, not an effect of page or tab load', () => {
   assert.match(detailSource, /onClick=\{analyzeItem\}/)
-  assert.match(detailSource, /supabase\.functions\.invoke\('seller-ai', \{ body: \{ feature: 'ITEM_ANALYSIS', product_id: id \} \}\)/)
+  assert.match(detailSource, /supabase\.functions\.invoke\('seller-ai', \{ body: \{ feature: 'ITEM_ANALYSIS', product_id: id, request_id: crypto\.randomUUID\(\) \} \}\)/)
   const tabHandler = detailSource.slice(detailSource.indexOf('function handleTabKeyDown'), detailSource.indexOf('async function analyzeItem'))
   assert.doesNotMatch(tabHandler, /supabase|invoke\(/)
 })

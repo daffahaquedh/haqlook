@@ -57,11 +57,13 @@ test('authenticity cautions are never applied as seller description suggestions'
 
 test('ITEM_ANALYSIS still finalizes token/cost usage before returning results', async () => {
   const source = await readFile(new URL('../supabase/functions/seller-ai/index.ts', import.meta.url), 'utf8')
+  const accounting = await readFile(new URL('../supabase/functions/seller-ai/usage-accounting.ts', import.meta.url), 'utf8')
   assert.match(source, /feature:\s*'ITEM_ANALYSIS'/)
-  assert.match(source, /finalize_ai_usage/)
-  assert.match(source, /p_input_tokens:\s*tokens\.input/)
-  assert.match(source, /p_output_tokens:\s*tokens\.output/)
-  assert.match(source, /p_estimated_cost:\s*actualCost/)
+  assert.match(source, /finalizeAiUsage\(accounting, user\.id, usageId, tokens\.input, tokens\.output, actualCost\)/)
+  assert.match(accounting, /client\.rpc\('finalize_ai_usage_server'/)
+  assert.match(accounting, /p_input_tokens:\s*inputTokens/)
+  assert.match(accounting, /p_output_tokens:\s*outputTokens/)
+  assert.match(accounting, /p_estimated_cost:\s*estimatedCost/)
 })
 
 test('Responses request pins GPT-6 Luna and low reasoning without sampling options', () => {
