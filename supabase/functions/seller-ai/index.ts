@@ -1,5 +1,5 @@
 import 'jsr:@supabase/functions-js/edge-runtime.d.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.116.0'
 import { DEFAULT_MODEL, estimateCostIdr, maxOutputTokens, reservationCostIdr } from './pricing.ts'
 import { ITEM_ANALYSIS_SCHEMA, normalizeItemAnalysis } from './analysis-schema.ts'
 import { createItemAnalysisRequest } from './analysis-request.js'
