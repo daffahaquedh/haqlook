@@ -5,11 +5,18 @@ import { ITEM_ANALYSIS_SCHEMA, normalizeItemAnalysis } from './analysis-schema.t
 import { createItemAnalysisRequest } from './analysis-request.js'
 import { handleHunterRequest } from './hunter-handler.ts'
 import { handleListingGeneration } from './listing-generation.ts'
+import { accountingRequestKey, finalizeAiUsage, releaseAiUsage, reserveAiUsage } from './usage-accounting.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
+}
+
+function createAccountingClient(supabaseUrl: string) {
+  const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
+  if (!serviceRoleKey) return null
+  return createClient(supabaseUrl, serviceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } })
 }
 
 function response(body: Record<string, unknown>, status = 200) {
@@ -69,10 +76,6 @@ function providerMessage(status: number) {
   return 'AI provider is temporarily unavailable. Please retry later.'
 }
 
-async function releaseReservation(supabase: ReturnType<typeof createClient>, usageId: string) {
-  await supabase.rpc('release_ai_usage', { p_usage_id: usageId }).catch(() => undefined)
-}
-
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (request.method !== 'POST') return errorResponse('METHOD_NOT_ALLOWED', 'Only POST is supported.', 405)
@@ -92,17 +95,20 @@ Deno.serve(async (request) => {
 
   const body = await request.json().catch(() => null) as Record<string, unknown> | null
   if (!body) return errorResponse('INVALID_REQUEST', 'Request body must be valid JSON.', 400)
+  const accounting = createAccountingClient(supabaseUrl)
+  if (!accounting) return errorResponse('SERVER_DATABASE_NOT_CONFIGURED', 'AI accounting is not configured on the server.', 503)
   const openAiKey = Deno.env.get('OPENAI_API_KEY')
   if (String(body.feature || '').startsWith('HUNTER_')) {
-    return handleHunterRequest({ supabase, user, role, body, openAiKey: openAiKey || '', supabaseUrl, corsHeaders })
+    return handleHunterRequest({ supabase, accounting, user, role, body, openAiKey: openAiKey || '', supabaseUrl, corsHeaders })
   }
   if (body.feature === 'LISTING_GENERATION') {
-    return handleListingGeneration({ supabase, user, body, openAiKey: openAiKey || '', corsHeaders })
+    return handleListingGeneration({ supabase, accounting, user, body, openAiKey: openAiKey || '', corsHeaders })
   }
   if (!openAiKey) return errorResponse('AI_NOT_CONFIGURED', 'AI belum diaktifkan di server. Inventory tetap dapat digunakan.', 503)
   if (body.feature !== 'ITEM_ANALYSIS') return errorResponse('INVALID_FEATURE', 'Only ITEM_ANALYSIS, LISTING_GENERATION, and Hunter features are enabled.', 400)
   const productId = typeof body.product_id === 'string' ? body.product_id : ''
   if (!productId) return errorResponse('PRODUCT_REQUIRED', 'Save the item before running AI Analyze.', 400)
+  const requestId = accountingRequestKey(body.request_id)
 
   const { data: item, error: itemError } = await supabase.from('products').select('id,name,brand,category,size_label,condition,condition_notes,defects,purchase_price,image_urls').eq('id', productId).maybeSingle()
   if (itemError || !item) return errorResponse('PRODUCT_NOT_FOUND', 'The inventory item could not be loaded.', 404)
@@ -112,10 +118,15 @@ Deno.serve(async (request) => {
 
   const model = DEFAULT_MODEL
   const reservedCost = reservationCostIdr(model)
-  const { data: usageId, error: reserveError } = await supabase.rpc('reserve_ai_usage', { p_feature: 'ITEM_ANALYSIS', p_model: model, p_estimated_cost: reservedCost })
-  if (reserveError || !usageId) {
-    const isBudget = String(reserveError?.message || '').includes('AI_BUDGET_EXCEEDED')
-    return errorResponse(isBudget ? 'AI_MONTHLY_BUDGET_REACHED' : 'AI_USAGE_RESERVATION_FAILED', isBudget ? 'AI monthly budget reached' : 'AI usage could not be reserved.', isBudget ? 429 : 403)
+  let usageId = ''
+  try {
+    usageId = await reserveAiUsage(accounting, user.id, 'ITEM_ANALYSIS', model, 'low', reservedCost, requestId)
+  } catch (error) {
+    const errorCode = String((error as Record<string, unknown>)?.code || '')
+    const status = Number((error as Record<string, unknown>)?.status || 403)
+    if (errorCode === 'AI_MONTHLY_BUDGET_REACHED') return errorResponse(errorCode, 'AI monthly budget reached', 429)
+    if (errorCode === 'AI_DUPLICATE_REQUEST') return errorResponse('DUPLICATE_REQUEST', 'This analysis request was already received.', 409)
+    return errorResponse('AI_USAGE_RESERVATION_FAILED', 'AI usage could not be reserved.', status)
   }
 
   const safeItem = {
@@ -157,13 +168,13 @@ Deno.serve(async (request) => {
     })
   } catch (error) {
     clearTimeout(timeout)
-    await releaseReservation(supabase, usageId)
+    await releaseAiUsage(accounting, user.id, usageId)
     return errorResponse(error instanceof DOMException && error.name === 'AbortError' ? 'AI_TIMEOUT' : 'AI_PROVIDER_UNAVAILABLE', error instanceof DOMException && error.name === 'AbortError' ? 'AI analysis timed out. Please retry.' : 'AI provider is unavailable. Please retry.', 504)
   }
   clearTimeout(timeout)
 
   if (!openAiResponse.ok) {
-    await releaseReservation(supabase, usageId)
+    await releaseAiUsage(accounting, user.id, usageId)
     return errorResponse(openAiResponse.status === 429 ? 'AI_RATE_LIMITED' : 'AI_PROVIDER_ERROR', providerMessage(openAiResponse.status), openAiResponse.status === 429 ? 429 : 502)
   }
 
@@ -173,15 +184,17 @@ Deno.serve(async (request) => {
   try {
     parsed = JSON.parse(text)
   } catch {
-    await releaseReservation(supabase, usageId)
+    await releaseAiUsage(accounting, user.id, usageId)
     return errorResponse('AI_INVALID_RESPONSE', 'AI returned an invalid structured result. Please retry.', 502)
   }
   const result = normalizeItemAnalysis(parsed)
   const tokens = usageTokens(payload || {})
   const actualCost = estimateCostIdr(model, tokens.input, tokens.output, tokens.cachedInput)
-  const { error: finalizeError } = await supabase.rpc('finalize_ai_usage', { p_usage_id: usageId, p_input_tokens: tokens.input, p_output_tokens: tokens.output, p_estimated_cost: actualCost })
-  if (finalizeError) return errorResponse('AI_USAGE_FINALIZE_FAILED', 'The analysis completed but its usage could not be recorded.', 500)
+  try {
+    await finalizeAiUsage(accounting, user.id, usageId, tokens.input, tokens.output, actualCost)
+  } catch {
+    return errorResponse('AI_USAGE_FINALIZE_FAILED', 'The analysis completed but its usage could not be recorded.', 500)
+  }
   const { data: usage } = await supabase.rpc('seller_ai_usage_summary')
   return response({ ok: true, feature: 'ITEM_ANALYSIS', model, result, usage: usage || null })
 })
-

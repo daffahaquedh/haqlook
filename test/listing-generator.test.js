@@ -45,7 +45,7 @@ function fakeSupabase({ product = item, reservation = { usage_id: 'usage-1', cre
     },
     async rpc(name, args) {
       calls.push({ name, args })
-      if (name === 'reserve_listing_ai_usage') return { data: reservation, error: reservationError }
+      if (name === 'reserve_ai_usage_server') return { data: reservation, error: reservationError }
       return { data: null, error: null }
     },
   }
@@ -243,19 +243,19 @@ test('all four marketplaces use exactly one OpenAI Responses call and finalize a
   const markets = ['GRAILED', 'VESTIAIRE', 'CAROUSELL', 'PRELOVED']
   const supabase = fakeSupabase()
   await withFetch(completedPayload(markets), async (requests) => {
-    const response = await handleListingGeneration({ supabase, user: { id: 'seller-1' }, body: { product_id: item.id, marketplaces: markets, request_id: '123e4567-e89b-42d3-a456-426614174000' }, openAiKey: 'not-a-real-key', corsHeaders: {} })
+    const response = await handleListingGeneration({ supabase, accounting: supabase, user: { id: 'seller-1' }, body: { product_id: item.id, marketplaces: markets, request_id: '123e4567-e89b-42d3-a456-426614174000' }, openAiKey: 'not-a-real-key', corsHeaders: {} })
     const data = await response.json()
     assert.equal(response.status, 200)
     assert.equal(requests.length, 1)
     assert.deepEqual(Object.keys(data.results), markets.map((market) => market.toLowerCase()))
-    assert.deepEqual(supabase.calls.find((call) => call.name === 'finalize_ai_usage').args, { p_usage_id: 'usage-1', p_input_tokens: 1250, p_output_tokens: 410, p_estimated_cost: estimateCostIdr('gpt-6-luna', 1250, 410, 200) })
+    assert.deepEqual(supabase.calls.find((call) => call.name === 'finalize_ai_usage_server').args, { p_user_id: 'seller-1', p_usage_id: 'usage-1', p_input_tokens: 1250, p_output_tokens: 410, p_estimated_cost: estimateCostIdr('gpt-6-luna', 1250, 410, 200), p_tool_cost: 0, p_search_calls: 0, p_details: {} })
   })
 })
 
 test('server duplicate-request reservation stops before OpenAI', async () => {
   const supabase = fakeSupabase({ reservation: { usage_id: 'usage-existing', created: false } })
   await withFetch(completedPayload(), async (requests) => {
-    const response = await handleListingGeneration({ supabase, user: { id: 'seller-1' }, body: { product_id: item.id, marketplaces: ['GRAILED'], request_id: '123e4567-e89b-42d3-a456-426614174000' }, openAiKey: 'test', corsHeaders: {} })
+    const response = await handleListingGeneration({ supabase, accounting: supabase, user: { id: 'seller-1' }, body: { product_id: item.id, marketplaces: ['GRAILED'], request_id: '123e4567-e89b-42d3-a456-426614174000' }, openAiKey: 'test', corsHeaders: {} })
     assert.equal(response.status, 409)
     assert.equal((await response.json()).error, 'DUPLICATE_REQUEST')
     assert.equal(requests.length, 0)
@@ -265,7 +265,7 @@ test('server duplicate-request reservation stops before OpenAI', async () => {
 test('monthly budget guard blocks before OpenAI and exposes the controlled budget message', async () => {
   const supabase = fakeSupabase({ reservation: null, reservationError: { message: 'AI_BUDGET_EXCEEDED' } })
   await withFetch(completedPayload(), async (requests) => {
-    const response = await handleListingGeneration({ supabase, user: { id: 'seller-1' }, body: { product_id: item.id, marketplaces: ['GRAILED'], request_id: '123e4567-e89b-42d3-a456-426614174000' }, openAiKey: 'test', corsHeaders: {} })
+    const response = await handleListingGeneration({ supabase, accounting: supabase, user: { id: 'seller-1' }, body: { product_id: item.id, marketplaces: ['GRAILED'], request_id: '123e4567-e89b-42d3-a456-426614174000' }, openAiKey: 'test', corsHeaders: {} })
     assert.equal(response.status, 429)
     assert.equal((await response.json()).message, 'AI monthly budget reached')
     assert.equal(requests.length, 0)
@@ -275,7 +275,7 @@ test('monthly budget guard blocks before OpenAI and exposes the controlled budge
 test('sold inventory is rejected before budget reservation or OpenAI', async () => {
   const supabase = fakeSupabase({ product: { ...item, status: 'sold' } })
   await withFetch(completedPayload(), async (requests) => {
-    const response = await handleListingGeneration({ supabase, user: { id: 'seller-1' }, body: { product_id: item.id, marketplaces: ['GRAILED'], request_id: '123e4567-e89b-42d3-a456-426614174000' }, openAiKey: 'test', corsHeaders: {} })
+    const response = await handleListingGeneration({ supabase, accounting: supabase, user: { id: 'seller-1' }, body: { product_id: item.id, marketplaces: ['GRAILED'], request_id: '123e4567-e89b-42d3-a456-426614174000' }, openAiKey: 'test', corsHeaders: {} })
     assert.equal(response.status, 409)
     assert.equal((await response.json()).error, 'PRODUCT_ALREADY_SOLD')
     assert.equal(supabase.calls.length, 0)
@@ -299,7 +299,7 @@ test('Hunter and Item Analysis branches remain in seller-ai', async () => {
   const source = await readFile(new URL('../supabase/functions/seller-ai/index.ts', import.meta.url), 'utf8')
   assert.match(source, /handleHunterRequest/)
   assert.match(source, /body\.feature !== 'ITEM_ANALYSIS'/)
-  assert.match(source, /finalize_ai_usage/)
+  assert.match(source, /finalizeAiUsage\(accounting, user\.id/)
 })
 
 test('mobile listing sheet styles target narrow viewports without fixed desktop width overflow', async () => {

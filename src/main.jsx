@@ -45,7 +45,7 @@ function App(){
   async function loadPublicProducts(){
     setLoading(true)
     if(!supabase){ setProducts(fallbackProducts); setLoading(false); return }
-    const {data,error}=await supabase.from('products').select('*').eq('is_published',true).order('created_at',{ascending:false})
+    const {data,error}=await supabase.from('products').select('id,slug,name,brand,model,price_idr,price_usd,size_label,condition,description,status,is_published,image_urls,created_at').eq('is_published',true).order('created_at',{ascending:false})
     if(!error && data?.length) setProducts(data)
     else setProducts(fallbackProducts)
     setLoading(false)
@@ -273,4 +273,5 @@ function Footer(){
 }
 
 createRoot(document.getElementById('root')).render(<App />)
+
 

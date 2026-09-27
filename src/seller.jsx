@@ -495,7 +495,7 @@ function InventoryDetail({ id }) {
     if (!AI_ENABLED) { setAnalysisMessage('AI belum diaktifkan. Barang tetap dapat dikelola seperti biasa.'); return }
     if (!supabase) { setAnalysisMessage('Koneksi database belum dikonfigurasi di lingkungan ini.'); return }
     setAnalysisMessage(''); setAnalysisBusy(true)
-    const { data, error } = await supabase.functions.invoke('seller-ai', { body: { feature: 'ITEM_ANALYSIS', product_id: id } })
+    const { data, error } = await supabase.functions.invoke('seller-ai', { body: { feature: 'ITEM_ANALYSIS', product_id: id, request_id: crypto.randomUUID() } })
     if (error || !data?.ok) {
       setAnalysisMessage(data?.message || errorText(error, 'Analisis AI gagal. Silakan coba lagi.'))
     } else {
@@ -950,3 +950,4 @@ function SettingsPage() {
   async function save(event) { event.preventDefault(); setBusy(true); const { error } = await supabase.from('app_settings').upsert({ key: 'ai_monthly_budget', value: { amount: Number(budget || 0), currency: 'IDR' }, updated_at: new Date().toISOString() }); setMessage(error ? errorText(error) : 'Monthly AI budget updated.'); setBusy(false) }
   return <div><SellerHeader eyebrow="ADMIN / CONFIGURATION" title="AI & Anggaran" copy="Small operational settings that affect seller workflows." /><form className="seller-panel settings-form" onSubmit={save}><PanelTitle eyebrow="AI GUARDRAIL" title="Monthly budget" /><p className="seller-muted">The server-side AI budget guard blocks paid calls when usage reaches this amount. Default: Rp100.000.</p><Field label="Monthly AI budget (IDR)" value={budget} onChange={setBudget} type="number" required /><div className="seller-form-actions"><button className="seller-primary" disabled={busy}>{busy ? 'Saving…' : 'Save settings'}</button></div>{message && <Notice tone={message.includes('updated') ? 'success' : 'error'}>{message}</Notice>}</form><section className="seller-panel"><PanelTitle eyebrow="FUTURE INTEGRATIONS" title="Telegram contract" /><p className="seller-muted">The future endpoint is documented in <code>docs/SELLER_PANEL.md</code>. It will require authenticated server-to-server access and will create master inventory records before any downstream action.</p></section></div>
 }
+

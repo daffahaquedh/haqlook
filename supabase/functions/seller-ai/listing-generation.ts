@@ -1,4 +1,5 @@
 import { DEFAULT_MODEL, estimateCostIdr, listingReservationCostIdr, maxListingOutputTokens } from './pricing.ts'
+import { accountingRequestKey, finalizeAiUsage, releaseAiUsage, reserveAiUsage } from './usage-accounting.ts'
 
 export const LISTING_GENERATION_PROFILES = {
   GRAILED: { label: 'Grailed', language: 'English', instructions: 'Fashion/resale oriented, searchable and concise. Emphasize only supplied brand, item type and size. Include seller-reported condition and defects.' },
@@ -169,30 +170,31 @@ function tokenUsage(payload) {
   return { input: Math.max(0, Math.floor(Number(usage.input_tokens) || 0)), cached: Math.max(0, Math.floor(Number(details.cached_tokens) || 0)), output: Math.max(0, Math.floor(Number(usage.output_tokens) || 0)) }
 }
 
-export async function handleListingGeneration({ supabase, user, body, openAiKey, corsHeaders }) {
+export async function handleListingGeneration({ supabase, accounting, user, body, openAiKey, corsHeaders }) {
   if (!openAiKey) return jsonResponse({ ok: false, error: 'AI_NOT_CONFIGURED', message: 'AI belum diaktifkan di server. Inventory tetap dapat digunakan.' }, 503, corsHeaders)
   const productId = typeof body.product_id === 'string' ? body.product_id : ''
   if (!productId) return jsonResponse({ ok: false, error: 'PRODUCT_REQUIRED', message: 'Save the inventory item before generating listings.' }, 400, corsHeaders)
   const marketplaces = selectedMarketplaces(body.marketplaces)
   if (!marketplaces.length) return jsonResponse({ ok: false, error: 'MARKETPLACE_REQUIRED', message: 'Select at least one marketplace.' }, 400, corsHeaders)
-  const requestId = typeof body.request_id === 'string' && /^[0-9a-f-]{36}$/i.test(body.request_id) ? body.request_id : ''
-  if (!requestId) return jsonResponse({ ok: false, error: 'REQUEST_ID_REQUIRED', message: 'Please retry this listing request.' }, 400, corsHeaders)
+  const requestId = accountingRequestKey(body.request_id)
 
   const { data: item, error: itemError } = await supabase.from('products').select('id,name,brand,category,subcategory,size_label,condition,condition_notes,defects,status').eq('id', productId).maybeSingle()
   if (itemError || !item) return jsonResponse({ ok: false, error: 'PRODUCT_NOT_FOUND', message: 'The inventory item could not be loaded.' }, 404, corsHeaders)
   if (String(item.status || '').toLowerCase() === 'sold') return jsonResponse({ ok: false, error: 'PRODUCT_ALREADY_SOLD', message: 'Barang sudah terjual. Periksa listing aktif di marketplace lain.' }, 409, corsHeaders)
 
   const model = DEFAULT_MODEL
-  const reservation = await supabase.rpc('reserve_listing_ai_usage', { p_request_key: requestId, p_model: model, p_estimated_cost: listingReservationCostIdr(model) })
-  const reservationData = asObject(reservation.data)
-  if (reservation.error || !reservationData.usage_id) {
-    const budget = String(reservation.error?.message || '').includes('AI_BUDGET_EXCEEDED')
-    return jsonResponse({ ok: false, error: budget ? 'AI_MONTHLY_BUDGET_REACHED' : 'AI_USAGE_RESERVATION_FAILED', message: budget ? 'AI monthly budget reached' : 'AI usage could not be reserved.' }, budget ? 429 : 403, corsHeaders)
+  let usageId = ''
+  try {
+    usageId = await reserveAiUsage(accounting, user.id, 'LISTING_GENERATION', model, 'low', listingReservationCostIdr(model), requestId)
+  } catch (error) {
+    const errorCode = String((error as Record<string, unknown>)?.code || '')
+    const status = Number((error as Record<string, unknown>)?.status || 403)
+    if (errorCode === 'AI_MONTHLY_BUDGET_REACHED') return jsonResponse({ ok: false, error: errorCode, message: 'AI monthly budget reached' }, 429, corsHeaders)
+    if (errorCode === 'AI_DUPLICATE_REQUEST') return jsonResponse({ ok: false, error: 'DUPLICATE_REQUEST', message: 'This listing request was already received. Refresh drafts before generating again.' }, 409, corsHeaders)
+    return jsonResponse({ ok: false, error: 'AI_USAGE_RESERVATION_FAILED', message: 'AI usage could not be reserved.' }, status, corsHeaders)
   }
-  if (!reservationData.created) return jsonResponse({ ok: false, error: 'DUPLICATE_REQUEST', message: 'This listing request was already received. Refresh drafts before generating again.' }, 409, corsHeaders)
 
-  const usageId = String(reservationData.usage_id)
-  const release = async () => { await supabase.rpc('release_ai_usage', { p_usage_id: usageId }).catch(() => undefined) }
+  const release = async () => { await releaseAiUsage(accounting, user.id, usageId) }
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 45_000)
   const safeItem = {
@@ -232,8 +234,11 @@ export async function handleListingGeneration({ supabase, user, body, openAiKey,
   }
   const tokens = tokenUsage(payload)
   const cost = estimateCostIdr(model, tokens.input, tokens.output, tokens.cached)
-  const { error: finalizeError } = await supabase.rpc('finalize_ai_usage', { p_usage_id: usageId, p_input_tokens: tokens.input, p_output_tokens: tokens.output, p_estimated_cost: cost })
-  if (finalizeError) return jsonResponse({ ok: false, error: 'AI_USAGE_FINALIZE_FAILED', message: 'Listing generation completed but its usage could not be recorded.' }, 500, corsHeaders)
+  try {
+    await finalizeAiUsage(accounting, user.id, usageId, tokens.input, tokens.output, cost)
+  } catch {
+    return jsonResponse({ ok: false, error: 'AI_USAGE_FINALIZE_FAILED', message: 'Listing generation completed but its usage could not be recorded.' }, 500, corsHeaders)
+  }
 
   try {
     const results = parseListingGenerationResponse(payload, safeItem, marketplaces)
