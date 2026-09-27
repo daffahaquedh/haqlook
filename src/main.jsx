@@ -8,25 +8,25 @@ import './staff-entry.css'
 import SellerApp from './seller.jsx'
 import StaffLogin from './staff-auth.jsx'
 import { supabase } from './supabase-client'
+import {
+  buildWhatsAppProductMessage,
+  filterAndSortPublicProducts,
+  publicProductUrl,
+  publicPurchaseAction,
+  publicStatusLabel,
+} from './public-storefront.js'
 
 const WHATSAPP = import.meta.env.VITE_WHATSAPP_NUMBER || ''
-
-const fallbackProducts = [
-  { id:'sample-1', slug:'p6000-silver-red', name:'P-6000 Silver / Red', brand:'Nike', model:'P-6000', price_idr:1299000, price_usd:79, size_label:'EU 42 / US 8.5', condition:'Excellent', description:'Curated pre-owned runner with metallic silver panels and red accents. Clean upper, fresh midsole, and ready for daily rotation.', status:'available', featured:true, is_published:true, image_urls:[], created_at:'2026-09-16T10:00:00Z' },
-  { id:'sample-2', slug:'p6000-blue-grey', name:'P-6000 Blue / Grey', brand:'Nike', model:'P-6000', price_idr:1199000, price_usd:73, size_label:'EU 41 / US 8', condition:'Good', description:'Grey mesh runner with blue accents. Carefully selected and photographed so buyers can inspect condition before ordering.', status:'reserved', featured:true, is_published:true, image_urls:[], created_at:'2026-09-15T10:00:00Z' },
-  { id:'sample-3', slug:'p6000-electric-blue', name:'P-6000 Electric Blue', brand:'Nike', model:'P-6000', price_idr:1349000, price_usd:82, size_label:'EU 43 / US 9.5', condition:'Excellent', description:'Bold electric blue colorway with silver overlays. Strong statement pair for technical runner and Y2K styling.', status:'available', featured:false, is_published:true, image_urls:[], created_at:'2026-09-14T10:00:00Z' },
-  { id:'sample-4', slug:'runner-orange-black', name:'Runner Orange / Black', brand:'Nike', model:'P-6000', price_idr:999000, price_usd:61, size_label:'EU 42.5 / US 9', condition:'Good', description:'Orange and black pre-owned runner from the HAQLOOK archive. Sold pairs stay visible as part of the store history.', status:'sold', featured:false, is_published:true, image_urls:[], created_at:'2026-09-12T10:00:00Z' },
-]
 
 function money(value){ return new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(Number(value||0)) }
 function route(){ return window.location.pathname || '/' }
 function navigate(path){ window.history.pushState({},'',path); window.dispatchEvent(new PopStateEvent('popstate')) }
-function initials(name='HAQLOOKS'){ return name.split(' ').slice(0,2).map(x=>x[0]).join('').toUpperCase() }
 
 function App(){
   const [path,setPath]=useState(route())
-  const [products,setProducts]=useState(fallbackProducts)
+  const [products,setProducts]=useState([])
   const [loading,setLoading]=useState(true)
+  const [catalogError,setCatalogError]=useState(false)
   const [staffEntry,setStaffEntry]=useState('checking')
   const isOperations=path==='/staff' || path.startsWith('/admin') || path.startsWith('/seller')
 
@@ -52,23 +52,24 @@ function App(){
   },[isOperations])
   async function loadPublicProducts(){
     setLoading(true)
-    if(!supabase){ setProducts(fallbackProducts); setLoading(false); return }
+    setCatalogError(false)
+    if(!supabase){ setProducts([]); setCatalogError(true); setLoading(false); return }
     const {data,error}=await supabase.from('products').select('id,slug,name,brand,model,price_idr,price_usd,size_label,condition,description,status,is_published,image_urls,created_at').eq('is_published',true).order('created_at',{ascending:false})
-    if(!error && data?.length) setProducts(data)
-    else setProducts(fallbackProducts)
+    if(error){setProducts([]);setCatalogError(true)}
+    else setProducts(data||[])
     setLoading(false)
   }
 
   let page
-  if(path==='/') page=<Home products={products} />
-  else if(path==='/shop') page=<Shop products={products} loading={loading} />
-  else if(path==='/archive') page=<Archive products={products} />
+  if(path==='/') page=<Home products={products} loading={loading} catalogError={catalogError} onRetry={loadPublicProducts} />
+  else if(path==='/shop') page=<Shop products={products} loading={loading} catalogError={catalogError} onRetry={loadPublicProducts} />
+  else if(path==='/archive') page=<Archive products={products} loading={loading} catalogError={catalogError} />
   else if(path==='/about') page=<About />
   else if(path==='/shipping') page=<Shipping />
   else if(path==='/staff' || path==='/admin/login') page=<StaffLogin />
   else if(path==='/admin') page=<SellerApp path={path} />
   else if(path==='/seller' || path.startsWith('/seller/')) page=<SellerApp path={path} />
-  else if(path.startsWith('/product/')) page=<ProductDetail product={products.find(p=>p.slug===decodeURIComponent(path.split('/').pop()))} />
+  else if(path.startsWith('/product/')) page=<ProductDetail product={products.find(p=>p.slug===decodeURIComponent(path.split('/').pop()))} loading={loading} catalogError={catalogError} onRetry={loadPublicProducts} />
   else page=<NotFound />
 
   return isOperations?<>{page}</>:<><Nav path={path} staffEntry={staffEntry}/>{page}<Footer staffEntry={staffEntry}/></>
@@ -87,11 +88,7 @@ function Link({to,children,className='',onNavigate,...props}){
 function SearchIcon(){return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>}
 function UserIcon(){return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c.9-4 3.2-6 7-6s6.1 2 7 6"/></svg>}
 function BagIcon(){return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8h14l-1 12H6L5 8Z"/><path d="M9 9V6a3 3 0 0 1 6 0v3"/></svg>}
-function CheckIcon(){return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.5 2.5L16 9"/></svg>}
-function BoxIcon(){return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Z"/><path d="m4 7.5 8 4.5 8-4.5M12 12v9"/></svg>}
 function GlobeIcon(){return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.4 2.6 3.6 5.6 3.6 9s-1.2 6.4-3.6 9c-2.4-2.6-3.6-5.6-3.6-9S9.6 5.6 12 3Z"/></svg>}
-function ShieldIcon(){return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 19 6v5c0 4.6-2.4 8-7 10-4.6-2-7-5.4-7-10V6l7-3Z"/><path d="m9 12 2 2 4-4"/></svg>}
-function LeafIcon(){return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 4C10 4 5 9 5 16c4 0 10-1 14-12Z"/><path d="M5 20c2-5 5-8 10-11"/></svg>}
 
 function Nav({path,staffEntry}){
   const [open,setOpen]=useState(false)
@@ -126,8 +123,8 @@ function Nav({path,staffEntry}){
   </div></header>
 }
 
-function Home({products}){
-  const latest=(products.length?products:fallbackProducts).slice(0,4)
+function Home({products,loading,catalogError,onRetry}){
+  const latest=products.slice(0,4)
   const heroProduct=latest[0]
   const heroImage=heroProduct?.image_urls?.[0]
   return <main className="home">
@@ -136,18 +133,13 @@ function Home({products}){
         <div className="hero-left">
           <div className="hero-title">MORE<br/>THAN<br/>SNEAKERS</div>
           <div className="hero-script">IT&apos;S A LIFESTYLE.</div>
-          <p className="hero-copy">Curated pre-owned sneakers.<br/>Authentic pieces. New stories.<br/>Worldwide.</p>
-          <Link to="/shop" className="hero-shop-btn">SHOP NOW <span>→</span></Link>
-          <div className="trust-row">
-            <div className="trust-item"><CheckIcon/><span>AUTHENTIC<br/>& VERIFIED</span></div>
-            <div className="trust-item"><BoxIcon/><span>WORLDWIDE<br/>SHIPPING</span></div>
-            <div className="trust-item"><GlobeIcon/><span>TRUSTED BY<br/>SNEAKER LOVERS</span></div>
-          </div>
+          <p className="hero-copy">Kurasi sneakers pre-owned.<br/>Detail kondisi dan ukuran ditampilkan jelas.</p>
+          <Link to="/shop" className="hero-shop-btn">JELAJAHI BARANG <span aria-hidden="true">→</span></Link>
         </div>
 
         <div className="hero-center">
           <div className="mascot-stage">
-            <img src="/mascot-latest.png" alt="HAQLOOKS orange cat mascot in streetwear" className="mascot-logo"/>
+            <img src="/mascot-latest.png" alt="" className="mascot-logo" fetchPriority="high" decoding="async"/>
           </div>
         </div>
 
@@ -159,7 +151,7 @@ function Home({products}){
           <div className="est-note">EST. 2026</div>
           <div className="globe-mark"><GlobeIcon/></div>
           <div className="collage-shoe">
-            <img src={heroImage||'/vibe-1.webp'} alt={heroProduct?.name||'Sneaker collage'}/>
+            {heroImage?<img src={heroImage} alt="" loading="lazy" decoding="async"/>:<div className="collage-placeholder" aria-hidden="true">HAQLOOKS / ARCHIVE</div>}
           </div>
         </div>
       </div>
@@ -167,107 +159,164 @@ function Home({products}){
 
     <section className="shell latest-section">
       <div className="latest-head">
-        <h2>LATEST DROP</h2>
-        <span>CAREFULLY SELECTED. READY FOR A NEW OWNER.</span>
-        <Link to="/shop" className="view-all">View all →</Link>
+        <h2>BARANG TERBARU</h2>
+        <span>Pasangan terkurasi, siap menemukan pemilik baru.</span>
+        <Link to="/shop" className="view-all">Lihat semua <span aria-hidden="true">→</span></Link>
       </div>
-      <div className="grid product-grid-home">
-        {latest.map((p,i)=><Card key={p.id} p={p} badge={p.status==='sold'?'SOLD':i===0?'NEW':i===3?'HOT':''}/>) }
-      </div>
+      {loading?<ProductGridSkeleton label="Memuat barang terbaru"/>:catalogError?<CatalogUnavailable onRetry={onRetry}/>:latest.length?<div className="grid public-product-grid product-grid-home">{latest.map(p=><Card key={p.id} p={p}/>)}</div>:<Empty text="Belum ada barang yang ditampilkan saat ini."/>}
     </section>
 
-    <section className="shell vibe-section">
-      <div className="vibe-head"><h2>SHOP BY VIBE</h2><span>DIFFERENT STYLES. SAME ENERGY.</span></div>
-      <div className="vibe-grid">
-        <VibeCard title="CLASSIC ICONS" product={latest[0]} tone="classic"/>
-        <VibeCard title="STREET ESSENTIALS" product={latest[1]} tone="street"/>
-        <VibeCard title="BOLD STATEMENTS" product={latest[3]||latest[2]} tone="bold"/>
-        <VibeCard title="DAILY BEATERS" product={latest[2]||latest[0]} tone="daily"/>
+    <section className="shell discovery-section" aria-labelledby="discovery-title">
+      <div className="discovery-intro">
+        <p className="eyebrow">JELAJAHI HAQLOOKS</p>
+        <h2 id="discovery-title">Cari pasangan yang terasa seperti kamu.</h2>
+        <p>Mulai dari koleksi yang tersedia, lihat pasangan yang sudah menemukan pemilik, atau kenali cerita kami.</p>
       </div>
+      <nav className="discovery-links" aria-label="Jelajahi Haqlooks">
+        <Link to="/shop"><span>01 / KOLEKSI</span><strong>Semua barang</strong><span aria-hidden="true">→</span></Link>
+        <Link to="/archive"><span>02 / ARSIP</span><strong>Pasangan terjual</strong><span aria-hidden="true">→</span></Link>
+        <Link to="/about"><span>03 / CERITA</span><strong>Tentang Haqlooks</strong><span aria-hidden="true">→</span></Link>
+      </nav>
     </section>
 
-    <section className="story-section">
-      <div className="shell story-grid">
-        <div className="story-poster">
-          <div className="poster-frame"><img src="/mascot-latest.png" alt="HAQLOOKS mascot poster"/></div>
-          <div className="paper-note">SAME<br/>SNEAKERS<br/>DIFFERENT<br/>STORIES</div>
-        </div>
-        <div className="story-copy-block">
-          <p className="story-label">OUR STORY</p>
-          <h2>FROM SNEAKERS<br/>TO A BIGGER COMMUNITY.</h2>
-          <p>HAQLOOKS started with a simple idea — giving iconic sneakers a second home. We curate authentic, high-quality pre-owned pieces for people who see sneakers as more than just shoes, but a part of their story.</p>
-        </div>
-        <div className="story-benefits">
-          <Benefit icon={<GlobeIcon/>} title="WORLDWIDE SHIPPING" copy="From Indonesia to everywhere you are."/>
-          <Benefit icon={<ShieldIcon/>} title="AUTHENTIC & QUALITY CHECKED" copy="Every pair is carefully inspected."/>
-          <Benefit icon={<LeafIcon/>} title="A MORE SUSTAINABLE CHOICE" copy="Great sneakers. Longer stories."/>
-          <div className="story-doodle">GOOD<br/>THINGS<br/>CIRCULATE<br/>:)</div>
-        </div>
+    <section className="shell buying-guide" aria-labelledby="buying-guide-title">
+      <div>
+        <p className="eyebrow">BELANJA DENGAN PERCAYA DIRI</p>
+        <h2 id="buying-guide-title">Lihat detailnya. Tanyakan yang perlu.</h2>
+        <p>Pilih barang, cek ukuran dan kondisi, lalu hubungi kami untuk memastikan ketersediaan. Biaya pengiriman dihitung sesuai tujuan.</p>
       </div>
-    </section>
-
-    <section className="newsletter-band">
-      <div className="shell newsletter-inner">
-        <div className="newsletter-title"><GlobeIcon/><h2>SNEAKERS<br/>HAVE NO BORDERS</h2></div>
-        <div className="newsletter-signup"><div className="newsletter-copy">Join our journey and get the latest drops, updates, and exclusive picks.</div><div className="newsletter-form"><input type="email" placeholder="Enter your email"/><button type="button">JOIN →</button></div></div>
-        <div className="newsletter-scribble">WORLDWIDE<br/>SHIPPING ✈</div>
-      </div>
+      <Link to="/shipping" className="textlink">CARA BELI & PENGIRIMAN <span aria-hidden="true">→</span></Link>
     </section>
   </main>
 }
 
-function Benefit({icon,title,copy}){
-  return <div className="benefit"><div className="benefit-icon">{icon}</div><div><strong>{title}</strong><p>{copy}</p></div></div>
-}
-
-function VibeCard({title,product,tone}){
-  const img=product?.image_urls?.[0]
-  const reference={classic:'/vibe-1.webp',street:'/vibe-2.webp',bold:'/vibe-3.webp',daily:'/vibe-4.webp'}
-  return <Link to="/shop" className={`vibe-card ${tone}`}>
-    <div className="vibe-media"><img src={img||reference[tone]} alt={title}/></div>
-    <div className="vibe-overlay"><h3>{title}</h3><span>Shop now →</span></div>
-  </Link>
-}
-
-function Card({p,badge=''}){
-  const img=p.image_urls?.[0] || (p.id?.startsWith('sample-')?`/drop-${p.id.slice(-1)}.webp`:null)
-  const label=badge|| (p.status==='sold'?'SOLD':'')
-  return <article className={`card product-card-precise ${p.id?.startsWith('sample-')?'reference-card':''}`}>
+function Card({p}){
+  const img=p.image_urls?.[0]
+  return <article className="card product-card-precise">
     <Link to={`/product/${p.slug}`} className="visual product-media">
-      {img?<img src={img} alt={p.name}/>:<FallbackVisual p={p}/>} 
-      {label?<span className={`drop-badge ${label.toLowerCase()}`}>{label}</span>:null}
-      <span className="heart">♡</span>
+      {img?<img src={img} alt={`${p.brand||''} ${p.name}`} loading="lazy" decoding="async"/>:<div className="product-image-unavailable">Foto belum tersedia</div>}
     </Link>
     <div className="card-body product-info">
-      <h3><Link to={`/product/${p.slug}`}>{p.brand} {p.model||p.name}</Link></h3>
-      <p>{p.name}</p>
-      <div className="product-meta-line"><span>{p.condition} Condition</span><span>{p.size_label||'Ask size'}</span></div>
-      <div className="product-price-row"><strong>{money(p.price_idr)}</strong><Link to={`/product/${p.slug}`} className="card-arrow">→</Link></div>
+      {p.brand?<p className="product-brand">{p.brand}</p>:null}
+      <h3><Link to={`/product/${p.slug}`}>{p.name}</Link></h3>
+      <div className="product-meta-line"><span>{p.size_label||'Ukuran belum tersedia'}</span><span>{p.condition||'Kondisi belum tersedia'}</span></div>
+      <div className="product-price-row"><strong>{money(p.price_idr)}</strong><Status s={p.status}/></div>
     </div>
   </article>
 }
 
-function FallbackVisual({p}){ return <div className={`fallback fallback-${p?.id?.slice(-1)||'x'}`}><span className="shoe-word">{p?.model||p?.brand||'HAQLOOKS'}</span><b>{initials(p?.name||'HAQLOOKS')}</b><small>CURATED / PRE-OWNED</small></div> }
-function Status({s}){ return <span className={`status ${s}`}>{String(s).toUpperCase()}</span> }
-
-function Shop({products,loading}){
-  const [q,setQ]=useState(''); const [st,setSt]=useState('all')
-  const filtered=useMemo(()=>products.filter(p=>(`${p.name} ${p.brand} ${p.model||''} ${p.size_label||''}`.toLowerCase().includes(q.toLowerCase()))&&(st==='all'||p.status===st)),[products,q,st])
-  return <PageIntro eyebrow="HAQLOOKS STORE" title="ALL PAIRS" copy="Curated pre-owned sneakers. One listing usually means one actual pair."><div className="filters"><input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search model, brand, size..."/><select value={st} onChange={e=>setSt(e.target.value)}><option value="all">All status</option><option value="available">Available</option><option value="reserved">Reserved</option><option value="sold">Sold</option></select></div>{loading?<Empty text="LOADING DROP..."/>:<div className="grid">{filtered.map(p=><Card p={p} key={p.id}/>)}</div>}</PageIntro>
+function Status({s}){
+  const label=publicStatusLabel(s)
+  return <span className={`status ${String(s||'').toLowerCase()}`} aria-label={`Status barang: ${label}`}>{label}</span>
 }
-function Archive({products}){ const sold=products.filter(p=>p.status==='sold'); return <PageIntro eyebrow="HAQLOOKS HISTORY" title="THE ARCHIVE" copy="Pairs that found a new owner stay here. More heat, more stories, same standard.">{sold.length?<div className="grid">{sold.map(p=><Card p={p} key={p.id}/>)}</div>:<Empty text="ARCHIVE IS WAITING FOR ITS FIRST SOLD PAIR."/>}</PageIntro> }
+
+function ProductGridSkeleton({label='Memuat koleksi'}){
+  return <div className="grid public-product-grid product-grid-skeleton" role="status" aria-label={label} aria-busy="true">
+    {Array.from({length:4},(_,index)=><div className="skeleton-product" key={index} aria-hidden="true"><div className="skeleton-image"/><div className="skeleton-line wide"/><div className="skeleton-line"/><div className="skeleton-line short"/></div>)}
+  </div>
+}
+
+function CatalogUnavailable({onRetry}){
+  return <div className="catalog-message" role="alert"><p>Etalase belum dapat dimuat. Coba lagi sebentar.</p>{onRetry?<button className="catalog-retry" type="button" onClick={onRetry}>Coba lagi</button>:null}</div>
+}
+
+function Shop({products,loading,catalogError,onRetry}){
+  const [query,setQuery]=useState('')
+  const [status,setStatus]=useState('all')
+  const [sort,setSort]=useState('newest')
+  const filtered=useMemo(()=>filterAndSortPublicProducts(products,{query,status,sort}),[products,query,status,sort])
+  return <PageIntro eyebrow="HAQLOOKS STORE" title="ALL PAIRS" copy="Sneakers pre-owned terkurasi. Setiap listing mewakili satu pasangan.">
+    <div className="filters shop-filters">
+      <label className="shop-search"><span className="sr-only">Cari brand, nama barang, atau ukuran</span><input type="search" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Cari brand, nama, ukuran…" autoComplete="off"/></label>
+      <label><span className="sr-only">Filter status barang</span><select value={status} onChange={event=>setStatus(event.target.value)}><option value="all">Semua status</option><option value="available">Tersedia</option><option value="reserved">Dipesan</option><option value="sold">Terjual</option></select></label>
+      <label><span className="sr-only">Urutkan barang</span><select value={sort} onChange={event=>setSort(event.target.value)}><option value="newest">Terbaru</option><option value="price-asc">Harga: rendah ke tinggi</option><option value="price-desc">Harga: tinggi ke rendah</option></select></label>
+    </div>
+    {loading?<ProductGridSkeleton label="Memuat katalog"/>:catalogError?<CatalogUnavailable onRetry={onRetry}/>:filtered.length?<div className="grid public-product-grid">{filtered.map(product=><Card p={product} key={product.id}/>)}</div>:<Empty text="Belum ada barang yang cocok. Coba ubah kata kunci atau status."/>}
+  </PageIntro>
+}
+function Archive({products,loading,catalogError}){
+  const sold=filterAndSortPublicProducts(products,{status:'sold'})
+  return <PageIntro eyebrow="HAQLOOKS HISTORY" title="THE ARCHIVE" copy="Pasangan yang sudah menemukan pemilik baru tetap menjadi bagian dari cerita Haqlooks.">
+    {loading?<ProductGridSkeleton label="Memuat arsip"/>:catalogError?<CatalogUnavailable/>:sold.length?<div className="grid public-product-grid">{sold.map(product=><Card p={product} key={product.id}/>)}</div>:<Empty text="Belum ada pasangan terjual di arsip."/>}
+  </PageIntro>
+}
 function About(){ return <PageIntro eyebrow="ABOUT HAQLOOKS" title={<>MORE THAN<br/>SNEAKERS.</>} copy="HAQLOOKS is a curated pre-owned sneaker store from Indonesia. We give iconic pairs a second home and build a bigger community around sneakers, style, and stories."><div className="editorial">{[['01','Curated with character.','Every pair should feel selected, not mass listed.'],['02','Photos before promises.','Pre-owned shopping works best when buyers can inspect the pair clearly.'],['03','Indonesia to anywhere.','Built for local and international buyers with worldwide shipping support.']].map(x=><article key={x[0]}><span>{x[0]}</span><h2>{x[1]}</h2><p>{x[2]}</p></article>)}</div></PageIntro> }
-function Shipping(){ return <PageIntro eyebrow="SHIPS FROM INDONESIA" title="WORLDWIDE SHIPPING" copy="International shipping is quoted per destination, pair size, and courier availability."><div className="editorial shipping">{[['01','Choose a pair','Check size, condition, status, and photos.'],['02','Message HAQLOOKS','Send the product plus destination country and postal code.'],['03','Get a quote','Shipping is confirmed before payment.'],['04','Pack & ship','Your pair is packed and shipped from Indonesia.']].map(x=><article key={x[0]}><span>{x[0]}</span><h2>{x[1]}</h2><p>{x[2]}</p></article>)}</div><div className="notice">Import taxes, customs fees, and local duties may be charged by the destination country and are the buyer’s responsibility.</div></PageIntro> }
+function Shipping(){ return <PageIntro eyebrow="SHIPS FROM INDONESIA" title="WORLDWIDE SHIPPING" copy="Biaya pengiriman dikonfirmasi sesuai tujuan, ukuran paket, dan ketersediaan kurir."><div className="editorial shipping">{[['01','Pilih barang','Periksa ukuran, kondisi, status, dan foto.'],['02','Hubungi Haqlooks','Kirim tautan barang serta negara dan kode pos tujuan.'],['03','Konfirmasi ongkir','Biaya pengiriman diinformasikan sebelum pembayaran.'],['04','Dikemas & dikirim','Barang dikemas dan dikirim dari Indonesia.']].map(x=><article key={x[0]}><span>{x[0]}</span><h2>{x[1]}</h2><p>{x[2]}</p></article>)}</div><div className="notice">Pajak impor, biaya bea cukai, dan pungutan lokal dapat dikenakan oleh negara tujuan dan menjadi tanggung jawab pembeli.</div><div className="shipping-actions"><Link to="/shop" className="btn primary">Jelajahi barang</Link><a href="https://www.instagram.com/haqlook/" target="_blank" rel="noreferrer" className="textlink">TANYAKAN PENGIRIMAN <span aria-hidden="true">↗</span></a></div></PageIntro> }
 
 function PageIntro({eyebrow,title,copy,children}){ return <main className="page"><section className="shell intro"><p className="eyebrow orange">{eyebrow}</p><h1>{title}</h1><p>{copy}</p></section><section className="shell section">{children}</section></main> }
 function Empty({text}){ return <div className="empty"><b>{text}</b></div> }
 
-function ProductDetail({product}){
-  if(!product) return <NotFound/>
-  const imgs=product.image_urls||[]
-  const msg=encodeURIComponent(`Hi HAQLOOKS, I'm interested in ${product.name} (${product.slug}). Is it still available?`)
-  const wa=WHATSAPP?`https://wa.me/${WHATSAPP}?text=${msg}`:`https://www.instagram.com/haqlook/`
-  return <main className="page"><section className="shell detail"><div className="gallery">{imgs.length?imgs.map((u,i)=><div className="photo" key={u+i}><img src={u} alt={`${product.name} ${i+1}`}/></div>):<div className="photo big"><FallbackVisual p={product}/></div>}</div><aside className="summary"><p className="eyebrow">{product.brand}</p><h1>{product.name}</h1><div className="summary-status"><Status s={product.status}/><span>{product.condition}</span></div><div className="price">{money(product.price_idr)}</div>{product.price_usd?<small>≈ US${product.price_usd}</small>:null}<dl><div><dt>Model</dt><dd>{product.model||'—'}</dd></div><div><dt>Size</dt><dd>{product.size_label||'Ask us'}</dd></div><div><dt>Condition</dt><dd>{product.condition}</dd></div><div><dt>Ships from</dt><dd>Indonesia</dd></div></dl><p className="desc">{product.description||'Please review all photos carefully for condition and details.'}</p>{product.status==='available'?<a className="btn primary wide" href={wa} target="_blank" rel="noreferrer">ASK / BUY NOW</a>:<button className="btn disabled wide" disabled>{product.status==='sold'?'SOLD — ARCHIVED':'CURRENTLY RESERVED'}</button>}<a className="btn outline wide" href="https://www.instagram.com/haqlook/" target="_blank" rel="noreferrer">MESSAGE ON INSTAGRAM ↗</a><Link to="/shop" className="textlink back">← BACK TO SHOP</Link></aside></section></main>
+function ProductDetail({product,loading,catalogError,onRetry}){
+  if(!product){
+    if(loading)return <main className="page"><div className="shell public-detail-loading" role="status">Memuat detail barang…</div></main>
+    if(catalogError)return <main className="page"><div className="shell section"><CatalogUnavailable onRetry={onRetry}/></div></main>
+    return <NotFound/>
+  }
+
+  const phone=WHATSAPP.replace(/\D/g,'')
+  const action=publicPurchaseAction(product.status,Boolean(phone))
+  const productUrl=publicProductUrl(window.location.origin,product.slug)
+  const message=encodeURIComponent(buildWhatsAppProductMessage(product,productUrl))
+  const contactUrl=phone?`https://wa.me/${phone}?text=${message}`:'https://www.instagram.com/haqlook/'
+  const normalizedStatus=String(product.status||'').toLowerCase()
+
+  return <main className="page public-product-page">
+    <section className="shell public-detail-layout">
+      <ProductGallery product={product}/>
+      <aside className="public-product-summary" aria-labelledby="public-product-title">
+        {product.brand?<p className="eyebrow">{product.brand}</p>:null}
+        <h1 id="public-product-title">{product.name}</h1>
+        <div className="summary-status">
+          <Status s={product.status}/>
+          {product.size_label?<span>Ukuran {product.size_label}</span>:null}
+          {product.condition?<span>Kondisi {product.condition}</span>:null}
+        </div>
+        <div className="public-product-price">{money(product.price_idr)}</div>
+        {product.price_usd?<small className="public-price-secondary">≈ US${product.price_usd}</small>:null}
+        {action.disabled?<button className="btn disabled wide" type="button" disabled>{action.label}</button>:<a className="btn primary wide public-primary-cta" href={contactUrl} target="_blank" rel="noreferrer">{action.label}</a>}
+        <p className="shipping-hint">Ongkir dihitung sesuai tujuan. <Link to="/shipping">Lihat info pengiriman</Link></p>
+        <dl className="public-product-facts">
+          {product.model?<div><dt>Model</dt><dd>{product.model}</dd></div>:null}
+          <div><dt>Dikirim dari</dt><dd>Indonesia</dd></div>
+        </dl>
+        <section className="public-condition-copy" aria-labelledby="condition-title">
+          <h2 id="condition-title">Kondisi & detail</h2>
+          <p className="public-product-description">{product.description||'Silakan periksa foto barang dan tanyakan detail kondisi sebelum membeli.'}</p>
+        </section>
+        <a className="btn outline wide public-secondary-cta" href="https://www.instagram.com/haqlook/" target="_blank" rel="noreferrer">Tanya lewat Instagram <span aria-hidden="true">↗</span></a>
+        {normalizedStatus==='sold'?<p className="public-archive-note">Pasangan ini sudah terjual dan ditampilkan sebagai arsip.</p>:null}
+        <Link to="/shop" className="textlink back">← KEMBALI KE TOKO</Link>
+      </aside>
+    </section>
+  </main>
+}
+
+function ProductGallery({product}){
+  const trackRef=useRef(null)
+  const [activeIndex,setActiveIndex]=useState(0)
+  const images=(Array.isArray(product.image_urls)?product.image_urls:[]).filter(url=>typeof url==='string'&&url.trim())
+  function updatePosition(){
+    const track=trackRef.current
+    if(track?.clientWidth)setActiveIndex(Math.min(images.length-1,Math.round(track.scrollLeft/track.clientWidth)))
+  }
+  function goTo(index){
+    const track=trackRef.current
+    if(!track)return
+    track.scrollTo({left:index*track.clientWidth,behavior:'smooth'})
+  }
+  if(!images.length)return <div className="public-gallery-empty" role="img" aria-label={`Foto ${product.name} belum tersedia`}>Foto barang belum tersedia</div>
+  return <div className="public-gallery" role="group" aria-label="Galeri foto barang" aria-roledescription="carousel">
+    <div className="public-gallery-track" ref={trackRef} onScroll={updatePosition}>
+      {images.map((url,index)=><div className="public-gallery-slide" key={`${url}-${index}`} role="group" aria-label={`Foto ${index+1} dari ${images.length}`}>
+        <img src={url} alt={`${product.brand?`${product.brand} `:''}${product.name} — foto ${index+1}`} loading={index===0?'eager':'lazy'} decoding="async" fetchPriority={index===0?'high':'auto'}/>
+      </div>)}
+    </div>
+    <div className="gallery-controls">
+      <button type="button" aria-label="Foto sebelumnya" disabled={activeIndex===0} onClick={()=>goTo(activeIndex-1)}>←</button>
+      <span aria-live="polite">{activeIndex+1} / {images.length}</span>
+      <button type="button" aria-label="Foto berikutnya" disabled={activeIndex>=images.length-1} onClick={()=>goTo(activeIndex+1)}>→</button>
+    </div>
+  </div>
 }
 
 function NotFound(){return <main className="login-wrap"><div className="empty"><b>404 — PAGE NOT FOUND</b><br/><br/><Link to="/" className="textlink">BACK HOME →</Link></div></main>}
@@ -283,5 +332,4 @@ function Footer({staffEntry='anonymous'}){
 }
 
 createRoot(document.getElementById('root')).render(<App />)
-
 
