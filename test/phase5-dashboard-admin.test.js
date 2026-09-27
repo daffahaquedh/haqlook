@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { ADMIN_ONLY_SECTIONS, ADMIN_SETTINGS_TABS, ADMIN_INSIGHT_TABS, adminInsightTabForPath, adminSettingsTabForPath, canAccessWorkspaceSection, workspacePathIsActive } from '../src/seller-utils.js'
 
 const sellerSource = await readFile(new URL('../src/seller.jsx', import.meta.url), 'utf8')
+const staffLoginSource = await readFile(new URL('../src/staff-auth.jsx', import.meta.url), 'utf8')
 const dashboardSource = sellerSource.slice(sellerSource.indexOf('function SellerDashboard('), sellerSource.indexOf('function Stat('))
 
 test('Beranda uses operational summaries and does not fetch AI usage or broad candidate records', () => {
@@ -23,10 +24,11 @@ test('Seller Beranda has a concise, action-first Indonesian home and no AI budge
   assert.doesNotMatch(dashboardSource, /AI BUDGET|Monthly usage/)
 })
 
-test('Seller sign-in, Barang, and item-entry flows use Indonesian labels', () => {
-  assert.match(sellerSource, /Alamat email/)
-  assert.match(sellerSource, /Kata sandi/)
-  assert.match(sellerSource, /Kembali ke etalase/)
+test('Shared Staff sign-in, Barang, and item-entry flows use Indonesian labels', () => {
+  assert.match(sellerSource, /auth.state !== 'signed_in'.*StaffLogin/)
+  assert.match(staffLoginSource, /<label>Email/)
+  assert.match(staffLoginSource, /<label>Kata sandi/)
+  assert.match(staffLoginSource, /Kembali ke etalase/)
   assert.match(sellerSource, /placeholder="Cari SKU, merek, atau nama barang…"/)
   assert.match(sellerSource, /<option value="capital">Modal tertinggi<\/option>/)
   assert.match(sellerSource, /title="Informasi barang"/)

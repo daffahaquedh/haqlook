@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { HunterAnalyticsPage, HunterChatPage } from './hunter'
 import { AI_ENABLED, supabase } from './supabase-client'
 import ListingGenerator from './listing-generator'
+import StaffLogin from './staff-auth.jsx'
 import './product-detail.css'
 import {
   ADMIN_INSIGHT_TABS,
@@ -113,36 +114,8 @@ export default function SellerApp({ path }) {
   }, [])
 
   if (auth.state === 'loading') return <SellerLoading text="Memeriksa akses seller…" />
-  if (auth.state !== 'signed_in') return <SellerLogin />
+  if (auth.state !== 'signed_in') return <StaffLogin />
   return <SellerWorkspace path={path} profile={auth.profile} onLogout={async () => { await supabase?.auth.signOut(); go('/seller') }} />
-}
-
-function SellerLogin() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [message, setMessage] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  async function submit(event) {
-    event.preventDefault()
-    setMessage('')
-    if (!supabase) {
-      setMessage('Akses seller belum dikonfigurasi di lingkungan ini.')
-      return
-    }
-    setBusy(true)
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
-    if (error) setMessage(errorText(error, 'Tidak dapat masuk. Periksa email dan kata sandi.'))
-    else go('/seller')
-    setBusy(false)
-  }
-
-  return <main className="seller-auth-page">
-    <section className="seller-auth-art"><img src="/mascot-latest.png" alt="HAQLOOKS mascot" /><p>PRE-OWNED SNEAKERS.<br />NEW STORIES.</p></section>
-    <section className="seller-auth-card"><span className="seller-kicker">HAQLOOKS / RUANG KERJA</span><h1>PANEL<br /><em>SELLER</em></h1><p>Kelola barang, hunting, listing marketplace, dan penjualan dari satu ruang kerja.</p>
-      <form onSubmit={submit}><label>Alamat email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} autoComplete="username" required /></label><label>Kata sandi<input type="password" value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="current-password" required /></label>{message && <Notice tone="error">{message}</Notice>}<button className="seller-primary" disabled={busy}>{busy ? 'MEMASUKKAN…' : 'MASUK →'}</button></form><a className="seller-back" href="/" onClick={(event) => { event.preventDefault(); go('/') }}>← Kembali ke etalase</a>
-    </section>
-  </main>
 }
 
 function SellerWorkspace({ path, profile, onLogout }) {

@@ -1,0 +1,30 @@
+.nav .nav-tools .staff-entry-link{display:flex;width:auto;min-width:44px;min-height:44px;align-items:center;justify-content:center;gap:6px;padding:0 8px;font-size:.7rem;font-weight:700}
+.nav .nav-tools .staff-entry-link svg{flex:0 0 20px}
+.nav .menu{min-width:44px;min-height:44px}
+.nav-account-secondary{display:none}
+.footer-staff-entry{width:max-content;margin-top:5px;color:#a69d8e;font-size:.66rem;text-decoration:underline;text-decoration-color:#554c40;text-underline-offset:3px}
+.nav a:focus-visible,.nav button:focus-visible,.footer-staff-entry:focus-visible{outline:2px solid #ef8126;outline-offset:3px}
+.staff-auth-page{min-height:100vh;min-height:100svh;min-height:100dvh;display:grid;grid-template-columns:minmax(0,1fr) minmax(390px,.9fr);background:#070807;color:#f1e7d2}
+.staff-auth-brand{display:flex;min-width:0;flex-direction:column;justify-content:space-between;padding:clamp(28px,6vw,78px);border-right:1px solid rgba(239,230,210,.13);background:radial-gradient(circle at 50% 45%,rgba(25,104,87,.2),transparent 48%),#090c0a}
+.staff-auth-wordmark{width:max-content;color:#efe6d2;font:900 clamp(1.8rem,3vw,2.7rem)/1 Georgia,'Times New Roman',serif;letter-spacing:-.06em}
+.staff-auth-visual{display:grid;justify-items:start;gap:4px;width:min(100%,520px);margin:auto}
+.staff-auth-visual img{width:min(100%,340px);max-height:320px;object-fit:contain;object-position:left center}
+.staff-auth-visual p{margin:0;color:#8fc9ba;font-size:.7rem;letter-spacing:.16em;line-height:1.35}
+.staff-auth-panel{display:grid;place-items:center;min-width:0;padding:clamp(24px,5vw,64px)}
+.staff-auth-content{width:min(420px,100%);min-width:0}
+.staff-auth-kicker{color:#8a998f;font-size:.64rem;font-weight:900;letter-spacing:.14em;text-transform:uppercase}
+.staff-auth-content h1{margin:14px 0 9px;color:#efe6d2;font:900 clamp(2.5rem,4.2vw,4rem)/.95 Georgia,'Times New Roman',serif;letter-spacing:-.065em}
+.staff-auth-lede{margin:0 0 23px;color:#aeb8af;font-size:.8rem;line-height:1.5}
+.staff-auth-content form{display:grid;gap:13px}
+.staff-auth-content label{display:grid;gap:6px;color:#d8ded7;font-size:.7rem;font-weight:800}
+.staff-auth-content input{width:100%;min-height:48px;padding:11px 13px;border:1px solid #35423a;border-radius:3px;background:#0b0f0c;color:#f1e7d2}
+.staff-auth-content input:focus-visible{outline:2px solid #2fa38c;outline-offset:2px}
+.staff-auth-submit{width:100%;min-height:48px;margin-top:3px;border:0;border-radius:3px;background:#efe6d2;color:#11140f;font-size:.73rem;font-weight:900;letter-spacing:.04em}
+.staff-auth-submit:disabled{opacity:.65;cursor:wait}
+.staff-auth-error{padding:10px 12px;border-left:3px solid #bd6655;background:#2c1714;color:#f0a18c;font-size:.72rem}
+.staff-auth-back{display:inline-flex;min-height:44px;align-items:center;margin-top:14px;color:#d89653;font-size:.71rem;font-weight:800}
+@media(max-width:1050px) and (min-width:821px){.staff-auth-page{grid-template-columns:minmax(0,.8fr) minmax(390px,1fr)}.staff-auth-brand,.staff-auth-panel{padding:28px}.staff-auth-visual img{width:min(100%,230px);max-height:240px}}
+@media(max-width:820px){.staff-auth-page{grid-template-columns:1fr;align-content:start;padding-top:max(18px,env(safe-area-inset-top));padding-right:max(20px,env(safe-area-inset-right));padding-bottom:max(20px,env(safe-area-inset-bottom));padding-left:max(20px,env(safe-area-inset-left))}.staff-auth-brand{justify-content:flex-start;padding:0;border:0;background:none}.staff-auth-visual{display:none}.staff-auth-panel{padding:24px 0 0}.staff-auth-content{width:min(440px,100%)}}
+@media(max-width:760px){.nav-links.open{max-height:calc(100vh - 76px);max-height:calc(100dvh - 76px - env(safe-area-inset-top));overflow-y:auto;overscroll-behavior:contain;padding-bottom:max(14px,env(safe-area-inset-bottom))}.nav-account-secondary{display:grid;gap:5px;margin-top:8px;padding:12px 0 4px;border-top:1px solid rgba(238,226,202,.12)}.nav-account-secondary>span{color:#8f877b;font-size:.58rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase}.nav-account-secondary>a{display:flex;min-height:44px;align-items:center;justify-content:space-between;color:#d2c8ba;font-size:.74rem;font-weight:800}}
+@media(max-width:480px){.staff-auth-brand{align-items:flex-start}.staff-auth-wordmark{font-size:1.8rem}.staff-auth-panel{padding-top:30px}.staff-auth-content h1{font-size:clamp(2.5rem,11vw,3.2rem)}}
+@media(prefers-reduced-motion:reduce){.staff-auth-page *,.nav *{scroll-behavior:auto;transition-duration:.01ms!important;animation-duration:.01ms!important}}

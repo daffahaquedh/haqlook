@@ -1,26 +1,15 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { createClient } from '@supabase/supabase-js'
 import './styles.css'
 import './home-refinement.css'
 import './admin.css'
 import './seller.css'
+import './staff-entry.css'
 import SellerApp from './seller.jsx'
+import StaffLogin from './staff-auth.jsx'
+import { supabase } from './supabase-client'
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
-const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY
 const WHATSAPP = import.meta.env.VITE_WHATSAPP_NUMBER || ''
-const supabase = SUPABASE_URL && SUPABASE_KEY ? createClient(SUPABASE_URL, SUPABASE_KEY) : null
-
-async function loadStaffRow(userId){
-  if(!supabase) return {data:null,error:null}
-  const current=await supabase.from('admins').select('user_id,role').eq('user_id',userId).maybeSingle()
-  if(!current.error) return current
-  // Keep the existing admin route usable during a staged migration. Legacy rows
-  // in the old schema are admins by definition; seller access still requires V1.
-  const legacy=await supabase.from('admins').select('user_id').eq('user_id',userId).maybeSingle()
-  return legacy.error?legacy:{data:legacy.data?{...legacy.data,role:'ADMIN'}:null,error:null}
-}
 
 const fallbackProducts = [
   { id:'sample-1', slug:'p6000-silver-red', name:'P-6000 Silver / Red', brand:'Nike', model:'P-6000', price_idr:1299000, price_usd:79, size_label:'EU 42 / US 8.5', condition:'Excellent', description:'Curated pre-owned runner with metallic silver panels and red accents. Clean upper, fresh midsole, and ready for daily rotation.', status:'available', featured:true, is_published:true, image_urls:[], created_at:'2026-09-16T10:00:00Z' },
@@ -38,10 +27,29 @@ function App(){
   const [path,setPath]=useState(route())
   const [products,setProducts]=useState(fallbackProducts)
   const [loading,setLoading]=useState(true)
+  const [staffEntry,setStaffEntry]=useState('checking')
+  const isOperations=path==='/staff' || path.startsWith('/admin') || path.startsWith('/seller')
 
   useEffect(()=>{ const fn=()=>setPath(route()); addEventListener('popstate',fn); return()=>removeEventListener('popstate',fn) },[])
   useEffect(()=>{ loadPublicProducts() },[])
-
+  useEffect(()=>{
+    if(isOperations || !supabase){setStaffEntry('anonymous');return}
+    let active=true
+    async function resolveStaffEntry(session){
+      if(!session?.user?.id){if(active)setStaffEntry('anonymous');return}
+      const {data,error}=await supabase.from('admins').select('user_id,role').eq('user_id',session.user.id).maybeSingle()
+      const role=String(data?.role||'').toUpperCase()
+      if(active)setStaffEntry(!error && data && ['ADMIN','SELLER'].includes(role)?'staff':'anonymous')
+    }
+    const {data:{subscription}}=supabase.auth.onAuthStateChange((_event,session)=>{
+      setTimeout(()=>{void resolveStaffEntry(session)},0)
+    })
+    supabase.auth.getSession().then(({data,error})=>{
+      if(error){if(active)setStaffEntry('anonymous');return}
+      void resolveStaffEntry(data.session)
+    })
+    return ()=>{active=false;subscription?.unsubscribe()}
+  },[isOperations])
   async function loadPublicProducts(){
     setLoading(true)
     if(!supabase){ setProducts(fallbackProducts); setLoading(false); return }
@@ -57,18 +65,23 @@ function App(){
   else if(path==='/archive') page=<Archive products={products} />
   else if(path==='/about') page=<About />
   else if(path==='/shipping') page=<Shipping />
-  else if(path==='/admin/login') page=<AdminLogin />
+  else if(path==='/staff' || path==='/admin/login') page=<StaffLogin />
   else if(path==='/admin') page=<SellerApp path={path} />
   else if(path==='/seller' || path.startsWith('/seller/')) page=<SellerApp path={path} />
   else if(path.startsWith('/product/')) page=<ProductDetail product={products.find(p=>p.slug===decodeURIComponent(path.split('/').pop()))} />
   else page=<NotFound />
 
-  const isOperations=path.startsWith('/admin') || path.startsWith('/seller')
-  return isOperations?<>{page}</>:<><Nav path={path}/>{page}<Footer/></>
+  return isOperations?<>{page}</>:<><Nav path={path} staffEntry={staffEntry}/>{page}<Footer staffEntry={staffEntry}/></>
 }
 
-function Link({to,children,className=''}){
-  return <a href={to} className={className} onClick={e=>{ if(!e.metaKey&&!e.ctrlKey){e.preventDefault();navigate(to)} }}>{children}</a>
+function Link({to,children,className='',onNavigate,...props}){
+  return <a href={to} className={className} {...props} onClick={event=>{
+    props.onClick?.(event)
+    if(event.defaultPrevented || event.metaKey || event.ctrlKey || event.button!==0)return
+    event.preventDefault()
+    navigate(to)
+    onNavigate?.()
+  }}>{children}</a>
 }
 
 function SearchIcon(){return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4 4"/></svg>}
@@ -80,24 +93,36 @@ function GlobeIcon(){return <svg viewBox="0 0 24 24" aria-hidden="true"><circle 
 function ShieldIcon(){return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 19 6v5c0 4.6-2.4 8-7 10-4.6-2-7-5.4-7-10V6l7-3Z"/><path d="m9 12 2 2 4-4"/></svg>}
 function LeafIcon(){return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 4C10 4 5 9 5 16c4 0 10-1 14-12Z"/><path d="M5 20c2-5 5-8 10-11"/></svg>}
 
-function Nav({path}){
+function Nav({path,staffEntry}){
   const [open,setOpen]=useState(false)
+  const menuButtonRef=useRef(null)
   const links=[['/','Home'],['/shop','Shop'],['/about','About'],['/shipping','Shipping']]
+  function closeMenu(){if(open)menuButtonRef.current?.focus();setOpen(false)}
+  useEffect(()=>{setOpen(false)},[path])
+  useEffect(()=>{
+    if(!open)return
+    function onKeyDown(event){
+      if(event.key==='Escape'){setOpen(false);menuButtonRef.current?.focus()}
+    }
+    window.addEventListener('keydown',onKeyDown)
+    return ()=>window.removeEventListener('keydown',onKeyDown)
+  },[open])
   return <header className="nav"><div className="shell nav-inner">
     <Link to="/" className="brand-wordmark">HAQLOOKS</Link>
-    <nav className={open?'nav-links open':'nav-links'}>
+    <nav id="public-navigation" aria-label="Navigasi utama" className={open?'nav-links open':'nav-links'}>
       {links.map(([href,label])=>{
         const active=href==='/'?path==='/':path.startsWith(href)
-        return <Link key={href} to={href} className={active?'active':''}>{label}</Link>
+        return <Link key={href} to={href} onNavigate={closeMenu} aria-current={active?'page':undefined} className={active?'active':''}>{label}</Link>
       })}
-      <a href="#contact" onClick={()=>setOpen(false)}>Contact</a>
+      <a href="#contact" onClick={()=>{setOpen(false);menuButtonRef.current?.focus()}}>Contact</a>
+      <div className="nav-account-secondary"><span>Akun staf</span><Link to={staffEntry==='staff'?'/seller':'/staff'} onNavigate={closeMenu}>{staffEntry==='staff'?'Panel':'Staff Login'} <span aria-hidden="true">→</span></Link></div>
     </nav>
     <div className="nav-tools">
       <Link to="/shop" className="icon-btn" aria-label="Search"><SearchIcon/></Link>
-      <Link to="/admin/login" className="icon-btn" aria-label="Account"><UserIcon/></Link>
+      <Link to={staffEntry==='staff'?'/seller':'/staff'} className="icon-btn staff-entry-link" aria-label={staffEntry==='staff'?'Buka Panel':'Staff Login'} title={staffEntry==='staff'?'Panel':'Staff Login'}><UserIcon/>{staffEntry==='staff'&&<span>Panel</span>}</Link>
       <Link to="/shop" className="icon-btn bag-btn" aria-label="Shop"><BagIcon/><span className="bag-dot">0</span></Link>
     </div>
-    <button className="menu" onClick={()=>setOpen(v=>!v)}>{open?'CLOSE':'MENU'}</button>
+    <button ref={menuButtonRef} type="button" className="menu" aria-label={open?'Tutup menu navigasi':'Buka menu navigasi'} aria-expanded={open} aria-controls="public-navigation" onClick={()=>setOpen(value=>!value)}>{open?'CLOSE':'MENU'}</button>
   </div></header>
 }
 
@@ -245,29 +270,14 @@ function ProductDetail({product}){
   return <main className="page"><section className="shell detail"><div className="gallery">{imgs.length?imgs.map((u,i)=><div className="photo" key={u+i}><img src={u} alt={`${product.name} ${i+1}`}/></div>):<div className="photo big"><FallbackVisual p={product}/></div>}</div><aside className="summary"><p className="eyebrow">{product.brand}</p><h1>{product.name}</h1><div className="summary-status"><Status s={product.status}/><span>{product.condition}</span></div><div className="price">{money(product.price_idr)}</div>{product.price_usd?<small>≈ US${product.price_usd}</small>:null}<dl><div><dt>Model</dt><dd>{product.model||'—'}</dd></div><div><dt>Size</dt><dd>{product.size_label||'Ask us'}</dd></div><div><dt>Condition</dt><dd>{product.condition}</dd></div><div><dt>Ships from</dt><dd>Indonesia</dd></div></dl><p className="desc">{product.description||'Please review all photos carefully for condition and details.'}</p>{product.status==='available'?<a className="btn primary wide" href={wa} target="_blank" rel="noreferrer">ASK / BUY NOW</a>:<button className="btn disabled wide" disabled>{product.status==='sold'?'SOLD — ARCHIVED':'CURRENTLY RESERVED'}</button>}<a className="btn outline wide" href="https://www.instagram.com/haqlook/" target="_blank" rel="noreferrer">MESSAGE ON INSTAGRAM ↗</a><Link to="/shop" className="textlink back">← BACK TO SHOP</Link></aside></section></main>
 }
 
-function AdminLogin(){
-  const [email,setEmail]=useState(''); const [password,setPassword]=useState(''); const [msg,setMsg]=useState(''); const [busy,setBusy]=useState(false)
-  async function submit(e){
-    e.preventDefault()
-    if(!supabase){setMsg('Supabase connection is missing in this local preview. Add the project environment variables to sign in.');return}
-    setBusy(true);setMsg('')
-    const {data,error}=await supabase.auth.signInWithPassword({email,password})
-    if(error){setMsg(error.message);setBusy(false);return}
-    const {data:admin,error:aerr}=await loadStaffRow(data.user.id)
-    if(aerr||!admin||String(admin.role||'ADMIN').toUpperCase()!=='ADMIN'){await supabase.auth.signOut();setMsg('This account is not registered as a HAQLOOKS admin.');setBusy(false);return}
-    navigate('/admin')
-  }
-  return <main className="admin-auth-page"><section className="auth-art"><div className="auth-art-inner"><img src="/mascot-latest.png" alt="HAQLOOKS mascot"/><p>PRE-OWNED SNEAKERS.<br/>NEW STORIES.</p></div></section><section className="auth-form-panel"><div className="auth-form-inner"><div className="auth-kicker">HAQLOOKS / OPERATIONS</div><h1>HAQLOOKS<br/><span>ADMIN</span></h1><p className="auth-lede">Sign in to manage the drop, inventory, and product stories.</p><form onSubmit={submit}><label>Email address<input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@haqlooks.com" autoComplete="username" required/></label><label>Password<input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••" autoComplete="current-password" required/></label>{msg&&<div className="error">{msg}</div>}<button className="btn primary wide" disabled={busy}>{busy?'SIGNING IN...':'SIGN IN →'}</button></form><Link to="/" className="auth-back">← Back to storefront</Link></div></section></main>
-}
-
 function NotFound(){return <main className="login-wrap"><div className="empty"><b>404 — PAGE NOT FOUND</b><br/><br/><Link to="/" className="textlink">BACK HOME →</Link></div></main>}
 
-function Footer(){
+function Footer({staffEntry='anonymous'}){
   return <footer id="contact"><div className="shell footer-grid precise-footer">
     <div><div className="footer-brand">HAQLOOKS</div><p>Pre-owned sneakers. New stories.</p></div>
     <div><strong>Shop</strong><Link to="/shop">All Products</Link><Link to="/shop">New Arrivals</Link><Link to="/archive">Archive</Link></div>
     <div><strong>About</strong><Link to="/about">Our Story</Link><Link to="/shipping">Shipping</Link><a href="https://www.instagram.com/haqlook/" target="_blank" rel="noreferrer">Instagram</a></div>
-    <div><strong>Follow Us</strong><a href="https://www.instagram.com/haqlook/" target="_blank" rel="noreferrer">Instagram @haqlook</a><span>Let&apos;s talk sneakers.</span></div>
+    <div><strong>Follow Us</strong><a href="https://www.instagram.com/haqlook/" target="_blank" rel="noreferrer">Instagram @haqlook</a><span>Let&apos;s talk sneakers.</span><Link to={staffEntry==='staff'?'/seller':'/staff'} className="footer-staff-entry">{staffEntry==='staff'?'Panel':'Staff Login'}</Link></div>
     <div className="footer-bottom"><span>© 2026 HAQLOOKS. All rights reserved.</span><span>◎ Indonesia</span><span>Sneakers. People. A Better Tomorrow.</span></div>
   </div></footer>
 }
