@@ -142,6 +142,65 @@ export function workspacePathIsActive(path, href) {
   return path === href || path.startsWith(`${href}/`)
 }
 
+export function jualanTabForPath(path) {
+  return path === '/seller/sales' ? 'sales' : 'listings'
+}
+
+export function jualanPathForTab(tab) {
+  return tab === 'sales' ? '/seller/sales' : '/seller/listings'
+}
+
+export function productDetailTabForRoute(tab) {
+  return ['marketplace', 'sales'].includes(tab) ? tab : 'summary'
+}
+
+export function makeListingWorkspaceRows(products = []) {
+  return products.flatMap((product) => {
+    const listings = Array.isArray(product.marketplace_listings) ? product.marketplace_listings : []
+    if (listings.length) return listings.map((listing) => ({ ...listing, products: { ...product } }))
+    if (['sold', 'archived'].includes(String(product.status || '').toLowerCase())) return []
+    return [{
+      id: `unlisted-${product.id}`,
+      product_id: product.id,
+      marketplace: null,
+      listing_status: 'NOT_LISTED',
+      listed_price: 0,
+      listing_url: null,
+      products: { ...product },
+      isVirtual: true,
+    }]
+  })
+}
+
+export function listingNeedsReview(listing) {
+  const product = listing?.products || {}
+  const relatedSales = product.sales
+  const sale = Array.isArray(relatedSales) ? relatedSales[0] : relatedSales
+  if (String(product.status || '').toLowerCase() !== 'sold') return false
+  return productDetailActiveListings([listing], sale?.sold_via).length > 0
+}
+
+export function listingWorkspaceFilterMatches(listing, filter) {
+  if (filter === 'all') return true
+  if (filter === 'needs-review') return listingNeedsReview(listing)
+  return String(listing?.listing_status || '').toUpperCase() === filter
+}
+
+export function makeListingTrackerUpdate(listing, values, now = new Date().toISOString()) {
+  const listingUrl = String(values?.listing_url || '').trim()
+  const safeUrl = listingUrl ? safeHttpUrl(listingUrl) : null
+  if (listingUrl && !safeUrl) throw new Error('URL listing harus menggunakan http:// atau https://.')
+  const requestedStatus = String(values?.listing_status || '').toUpperCase()
+  const listingStatus = LISTING_STATUSES.includes(requestedStatus) ? requestedStatus : listing?.listing_status || 'NOT_LISTED'
+  return {
+    listing_status: listingStatus,
+    listing_url: safeUrl,
+    listed_price: Math.max(0, Math.round(Number(values?.listed_price) || 0)),
+    listed_at: listingStatus === 'LISTED' ? (listing?.listed_at || now) : (listing?.listed_at || null),
+    last_updated: now,
+  }
+}
+
 export function huntingTabForPath(path) {
   return path === '/seller/sourcing' ? 'finds' : 'research'
 }
@@ -251,4 +310,3 @@ export function safeHttpUrl(value) {
 export function titleCaseStatus(value = '') {
   return String(value).replaceAll('_', ' ').toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase())
 }
-

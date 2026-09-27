@@ -10,6 +10,7 @@ import {
   productDetailActiveListings,
   productDetailPrimaryAction,
   productDetailTabForKey,
+  productDetailTabForRoute,
   safeHttpUrl,
 } from '../src/seller-utils.js'
 
@@ -36,6 +37,14 @@ test('ArrowLeft goes backward and wraps before Ringkas', () => {
 test('Home and End keyboard keys select the first and last tabs', () => {
   assert.equal(productDetailTabForKey('marketplace', 'Home'), 'summary')
   assert.equal(productDetailTabForKey('summary', 'End'), 'sales')
+})
+
+test('cross-workspace handoff selects Marketplace or Penjualan while ordinary deep links still default to Ringkas', () => {
+  assert.equal(productDetailTabForRoute('marketplace'), 'marketplace')
+  assert.equal(productDetailTabForRoute('sales'), 'sales')
+  assert.equal(productDetailTabForRoute('unknown'), 'summary')
+  assert.equal(productDetailTabForRoute(null), 'summary')
+  assert.match(detailSource, /productDetailTabForRoute\(new URLSearchParams\(window\.location\.search\)\.get\('tab'\)\)/)
 })
 
 test('incomplete and draft products prioritize Lengkapi barang', () => {
@@ -90,9 +99,9 @@ test('product header omits size when it is already embedded in the item title', 
   assert.equal(productDetailSubtitle({ name: 'Work jacket', size_label: 'L', condition: 'Good', category: 'Jaket' }), 'L · Good · Jaket')
 })
 
-test('Ringkas is selected by default and reset safely for another product id', () => {
-  assert.match(detailSource, /useState\('summary'\)/)
-  assert.match(detailSource, /setActiveTab\('summary'\);[\s\S]*?load\(\) \}, \[id\]\)/)
+test('Ringkas is the default route tab and selected Product Detail tab resets safely for another product id', () => {
+  assert.equal(productDetailTabForRoute(null), 'summary')
+  assert.match(detailSource, /setActiveTab\(productDetailTabForRoute\(new URLSearchParams\(window\.location\.search\)\.get\('tab'\)\)\);[\s\S]*?load\(\) \}, \[id\]\)/)
 })
 
 test('each workspace tab renders its own panel without deleting existing product routes', () => {
@@ -215,7 +224,7 @@ test('sale and listing edit sheets adapt to dynamic mobile height and iOS safe a
 test('marketplace and sale tab switching does not trigger extra Supabase query loops', () => {
   const tabEffect = detailSource.match(/useEffect\(\(\) => \{([\s\S]*?)\}, \[id\]\)/)
   assert.ok(tabEffect, 'product data should load once per product id, not per tab')
-  assert.match(tabEffect[1], /setActiveTab\('summary'\)/)
+  assert.match(tabEffect[1], /setActiveTab\(productDetailTabForRoute\(/)
   assert.match(tabEffect[1], /load\(\)/)
   assert.equal((detailSource.match(/from\('products'\)\.select\('\*'\)\.eq\('id', id\)\.single\(\)/g) || []).length, 1)
 })
@@ -226,4 +235,3 @@ test('mark-sold still calls the existing RPC with the same sale inputs', () => {
     assert.ok(detailSource.includes(field), `missing RPC argument ${field}`)
   }
 })
-

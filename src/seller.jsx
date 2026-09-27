@@ -9,6 +9,12 @@ import {
   calculateProfit,
   huntingPathForTab,
   huntingTabForPath,
+  jualanPathForTab,
+  jualanTabForPath,
+  listingNeedsReview,
+  listingWorkspaceFilterMatches,
+  makeListingTrackerUpdate,
+  makeListingWorkspaceRows,
   analysisSuggestionValue,
   analysisBilingualValue,
   applyItemAnalysisSuggestions,
@@ -25,6 +31,7 @@ import {
   productDetailActiveListings,
   productDetailPrimaryAction,
   productDetailTabForKey,
+  productDetailTabForRoute,
   safeHttpUrl,
   SOURCING_CANDIDATE_STATUSES,
   sourcingCandidateCanMoveToInventory,
@@ -148,8 +155,7 @@ function SellerWorkspace({ path, profile, onLogout }) {
   else if (section === 'inventory') page = <InventoryPage />
   else if (section === 'ai-hunter' || section === 'sourcing') page = <HuntingWorkspace path={workspacePath} />
   else if (section === 'hunter-analytics' && profile.role === 'ADMIN') page = <HunterAnalyticsPage />
-  else if (section === 'listings') page = <ListingsPage />
-  else if (section === 'sales') page = <SalesPage />
+  else if (section === 'listings' || section === 'sales') page = <JualanWorkspace path={workspacePath} />
   else if (section === 'ai-usage' && profile.role === 'ADMIN') page = <AIUsagePage />
   else if (section === 'settings' && profile.role === 'ADMIN') page = <SettingsPage />
   else if (['users-roles', 'marketplace-settings', 'app-settings'].includes(section) && profile.role === 'ADMIN') {
@@ -183,6 +189,32 @@ function HuntingWorkspace({ path }) {
     </nav>
     {visitedTabs.has('research') && <section className="hunting-workspace-panel" aria-label="Riset" hidden={activeTab !== 'research'}><HunterChatPage embedded onOpenFinds={() => go('/seller/sourcing')} /></section>}
     {visitedTabs.has('finds') && <section className="hunting-workspace-panel" aria-label="Temuan tersimpan" hidden={activeTab !== 'finds'}><SourcingPage embedded onOpenProduct={(productId) => go(`/seller/inventory/${productId}`)} onOpenResearch={() => go('/seller/ai-hunter')} /></section>}
+  </div>
+}
+
+function JualanWorkspace({ path }) {
+  const activeTab = jualanTabForPath(path)
+  const [visitedTabs, setVisitedTabs] = useState(() => new Set([activeTab]))
+
+  useEffect(() => {
+    setVisitedTabs((current) => current.has(activeTab) ? current : new Set([...current, activeTab]))
+  }, [activeTab])
+
+  function selectTab(event, tab) {
+    event.preventDefault()
+    go(jualanPathForTab(tab))
+  }
+
+  return <div className="jualan-workspace">
+    <header className="jualan-workspace-heading">
+      <div><span className="seller-kicker">SELLER WORKSPACE / JUALAN</span><h1>Jualan</h1><p>Kelola listing marketplace dan transaksi barang terjual.</p></div>
+    </header>
+    <nav className="jualan-workspace-tabs" aria-label="Jualan">
+      <a href="/seller/listings" aria-current={activeTab === 'listings' ? 'page' : undefined} className={activeTab === 'listings' ? 'active' : ''} onClick={(event) => selectTab(event, 'listings')}><span>Listing</span><small>Pantau barang di marketplace</small></a>
+      <a href="/seller/sales" aria-current={activeTab === 'sales' ? 'page' : undefined} className={activeTab === 'sales' ? 'active' : ''} onClick={(event) => selectTab(event, 'sales')}><span>Terjual</span><small>Lihat transaksi dan hasil</small></a>
+    </nav>
+    {visitedTabs.has('listings') && <section className="jualan-workspace-panel" aria-label="Listing" hidden={activeTab !== 'listings'}><ListingsPage onOpenProduct={(productId) => go(`/seller/inventory/${productId}?tab=marketplace`)} /></section>}
+    {visitedTabs.has('sales') && <section className="jualan-workspace-panel" aria-label="Terjual" hidden={activeTab !== 'sales'}><SalesPage onOpenProduct={(productId) => go(`/seller/inventory/${productId}?tab=sales`)} /></section>}
   </div>
 }
 
@@ -364,7 +396,7 @@ function NewInventory() {
 function Field({ label, value, onChange, type = 'text', placeholder, required = false, textarea = false, name }) { return <label>{label}{textarea ? <textarea name={name} value={value} onChange={onChange ? (event) => onChange(event.target.value) : undefined} placeholder={placeholder} rows="4" required={required} /> : <input name={name} type={type} value={value} onChange={onChange ? (event) => onChange(event.target.value) : undefined} placeholder={placeholder} required={required} />}</label> }
 
 function InventoryDetail({ id }) {
-  const [item, setItem] = useState(null); const [listings, setListings] = useState([]); const [sales, setSales] = useState([]); const [message, setMessage] = useState(''); const [editingListing, setEditingListing] = useState(null); const [showSold, setShowSold] = useState(false); const [showListingGenerator, setShowListingGenerator] = useState(false); const [analysis, setAnalysis] = useState(null); const [lastAnalysis, setLastAnalysis] = useState(null); const [analysisApplied, setAnalysisApplied] = useState(false); const [analysisBusy, setAnalysisBusy] = useState(false); const [analysisMessage, setAnalysisMessage] = useState(''); const [selectedSuggestions, setSelectedSuggestions] = useState({}); const [activeTab, setActiveTab] = useState('summary'); const tabRefs = useRef({})
+  const [item, setItem] = useState(null); const [listings, setListings] = useState([]); const [sales, setSales] = useState([]); const [message, setMessage] = useState(''); const [editingListing, setEditingListing] = useState(null); const [showSold, setShowSold] = useState(false); const [showListingGenerator, setShowListingGenerator] = useState(false); const [analysis, setAnalysis] = useState(null); const [lastAnalysis, setLastAnalysis] = useState(null); const [analysisApplied, setAnalysisApplied] = useState(false); const [analysisBusy, setAnalysisBusy] = useState(false); const [analysisMessage, setAnalysisMessage] = useState(''); const [selectedSuggestions, setSelectedSuggestions] = useState({}); const [activeTab, setActiveTab] = useState(() => productDetailTabForRoute(new URLSearchParams(window.location.search).get('tab'))); const tabRefs = useRef({})
   async function load() {
     if (!supabase) return
     const [{ data: product, error }, { data: listingData }, { data: saleData }] = await Promise.all([
@@ -374,7 +406,7 @@ function InventoryDetail({ id }) {
     ])
     if (error) setMessage(errorText(error, 'Inventory item not found.')); else { setItem(product); setListings(listingData || []); setSales(saleData || []) }
   }
-  useEffect(() => { setActiveTab('summary'); setMessage(''); setAnalysis(null); setLastAnalysis(null); setAnalysisApplied(false); setAnalysisMessage(''); setSelectedSuggestions({}); setEditingListing(null); setShowSold(false); setShowListingGenerator(false); load() }, [id])
+  useEffect(() => { setActiveTab(productDetailTabForRoute(new URLSearchParams(window.location.search).get('tab'))); setMessage(''); setAnalysis(null); setLastAnalysis(null); setAnalysisApplied(false); setAnalysisMessage(''); setSelectedSuggestions({}); setEditingListing(null); setShowSold(false); setShowListingGenerator(false); load() }, [id])
   function handleTabKeyDown(event, tabId) {
     const nextTab = productDetailTabForKey(tabId, event.key)
     if (nextTab === tabId || !PRODUCT_DETAIL_TABS.some((tab) => tab.id === nextTab)) return
@@ -719,16 +751,113 @@ function SourcingPage({ embedded = false, onOpenProduct = () => {}, onOpenResear
   </div>
 }
 
-function ListingsPage() {
-  const [items, setItems] = useState([]); const [message, setMessage] = useState('')
-  useEffect(() => { async function load() { if (!supabase) return; const { data, error } = await supabase.from('marketplace_listings').select('*, products(id,name,brand,sku,image_urls,status)').order('last_updated', { ascending: false }); if (error) setMessage(errorText(error)); else setItems(data || []) }; load() }, [])
-  return <div><SellerHeader eyebrow="DISTRIBUTION STATUS" title="Listing" copy="Review marketplace copy and track where each master inventory item is listed. Posting and removal remain manual." />{message && <Notice tone="error">{message}</Notice>}<section className="seller-panel"><PanelTitle eyebrow="ALL CHANNELS" title="Marketplace listings" />{items.length ? <div className="listing-table">{items.map((listing) => { const safeUrl = safeHttpUrl(listing.listing_url); const productTitle = listing.listing_title || listing.products?.name || 'Unknown item'; return <article className="listing-row wide-row" key={listing.id}><img src={imageFor(listing.products)} alt="" loading="lazy" /><div className="listing-info"><span className="listing-sku">{listing.products?.sku || 'SKU pending'}</span><strong className="listing-title">{productTitle}</strong><span className="listing-marketplace">{titleCaseStatus(listing.marketplace)}</span><p className="listing-note">{listing.listing_description || (safeUrl ? 'Listing URL saved' : 'No URL saved')}</p><div className="listing-actions">{listing.products?.id && <a className="listing-action-link" href={`/seller/inventory/${listing.products.id}`} onClick={(event) => { event.preventDefault(); go(`/seller/inventory/${listing.products.id}`) }}>Buka barang <span aria-hidden="true">→</span></a>}{safeUrl && <a className="listing-action-link" href={safeUrl} target="_blank" rel="noreferrer">Buka listing <span aria-hidden="true">↗</span></a>}</div>{listing.products?.status === 'sold' && listing.listing_status === 'LISTED' && <em className="listing-active-warning">Item sold — check this external listing manually.</em>}</div><div className="listing-summary"><b className={`listing-status ${listing.listing_status.toLowerCase()}`}>{titleCaseStatus(listing.listing_status)}</b><small>{listing.listed_price ? moneyIdr(listing.listed_price) : '—'}</small></div></article> })}</div> : <div className="seller-empty"><strong>NO LISTINGS RECORDED</strong><p>Open an inventory item to update its marketplace status.</p></div>}</section></div>
+function ListingsPage({ onOpenProduct }) {
+  const [products, setProducts] = useState([])
+  const [filter, setFilter] = useState('all')
+  const [editingListing, setEditingListing] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [message, setMessage] = useState(null)
+
+  async function load() {
+    if (!supabase) { setProducts([]); setLoading(false); return }
+    setLoading(true)
+    const { data, error } = await supabase.from('products')
+      .select('id,name,brand,sku,image_urls,status,created_at,marketplace_listings(*),sales(sold_via)')
+      .order('created_at', { ascending: false })
+    if (error) setMessage({ tone: 'error', text: errorText(error) })
+    else setProducts(data || [])
+    setLoading(false)
+  }
+
+  useEffect(() => { void load() }, [])
+
+  async function saveListing(event) {
+    event.preventDefault()
+    if (!editingListing || editingListing.isVirtual) return
+    let updates
+    try {
+      updates = makeListingTrackerUpdate(editingListing, editingListing)
+    } catch (error) {
+      setMessage({ tone: 'error', text: error.message })
+      return
+    }
+    const { error } = await supabase.from('marketplace_listings').update(updates).eq('id', editingListing.id)
+    if (error) setMessage({ tone: 'error', text: errorText(error) })
+    else {
+      setEditingListing(null)
+      setMessage({ tone: 'success', text: 'Listing berhasil diperbarui.' })
+      await load()
+    }
+  }
+
+  const rows = makeListingWorkspaceRows(products)
+  const visibleRows = rows.filter((listing) => listingWorkspaceFilterMatches(listing, filter))
+  const filters = [['all', 'Semua'], ['NOT_LISTED', 'Belum listing'], ['DRAFT', 'Draft'], ['LISTED', 'Aktif'], ['needs-review', 'Perlu dicek'], ['SOLD', 'Terjual'], ['REMOVED', 'Dihapus']]
+
+  return <div className="jualan-listings-page">
+    {message && <div role={message.tone === 'error' ? 'alert' : 'status'}><Notice tone={message.tone}>{message.text}</Notice></div>}
+    <section className="seller-panel listing-overview-panel">
+      <PanelTitle eyebrow="STATUS MARKETPLACE" title="Listing barang" />
+      <nav className="listing-status-filters" aria-label="Filter status listing">{filters.map(([value, label]) => <button key={value} type="button" aria-pressed={filter === value} className={filter === value ? 'active' : ''} onClick={() => setFilter(value)}>{label}{value === 'needs-review' ? <span className="sr-only"> barang terjual yang perlu diperiksa</span> : null}</button>)}</nav>
+      <div className="listing-results-count" aria-live="polite">{visibleRows.length} barang</div>
+      {loading ? <div className="seller-empty" role="status"><span className="seller-spinner" /><p>Memuat listing…</p></div> : visibleRows.length ? <div className="listing-table">{visibleRows.map((listing) => {
+        const product = listing.products || {}
+        const safeUrl = safeHttpUrl(listing.listing_url)
+        const needsReview = listingNeedsReview(listing)
+        const productTitle = listing.listing_title || productDisplayTitle(product)
+        const marketplaceLabel = listing.marketplace ? marketplaceStatusLabel(listing.marketplace) : 'Marketplace belum dipilih'
+        return <article className="listing-row wide-row jualan-listing-row" key={listing.id}>
+          <img src={imageFor(product)} alt="" loading="lazy" />
+          <div className="listing-info">
+            <span className="listing-sku">{product.sku || 'SKU belum ada'} · {marketplaceLabel}</span>
+            <strong className="listing-title">{productTitle}</strong>
+            {listing.listing_description && <p className="listing-note">{listing.listing_description}</p>}
+            {needsReview && <p className="listing-active-warning" role="alert">Barang sudah terjual, tetapi masih ada listing marketplace yang perlu dicek.</p>}
+            <div className="listing-actions">
+              <button type="button" className="listing-action-link" onClick={() => onOpenProduct(product.id)}>Buka barang <span aria-hidden="true">→</span></button>
+              {!listing.isVirtual && <button type="button" className="listing-action-link" aria-label={`Edit listing ${marketplaceLabel} untuk ${productTitle}`} onClick={() => { setMessage(null); setEditingListing({ ...listing }) }}>Edit status / harga / URL</button>}
+              {safeUrl && <a className="listing-action-link" href={safeUrl} target="_blank" rel="noreferrer">Buka listing <span aria-hidden="true">↗</span></a>}
+            </div>
+          </div>
+          <div className="listing-summary"><b className={`listing-status ${String(listing.listing_status || '').toLowerCase()}`}>{marketplaceStatusLabel(listing.listing_status)}</b><small>{Number(listing.listed_price || 0) > 0 ? moneyIdr(listing.listed_price) : '—'}</small></div>
+        </article>
+      })}</div> : <div className="seller-empty listing-empty"><strong>{filter === 'all' ? 'Belum ada listing marketplace.' : 'Tidak ada barang untuk filter ini.'}</strong><p>{filter === 'all' ? 'Barang aktif yang belum listing akan muncul di sini. Buka Barang untuk mengelola detail item.' : 'Coba pilih status lain untuk melihat barang.'}</p>{filter === 'all' && <button type="button" className="seller-secondary compact" onClick={() => go('/seller/inventory')}>Buka Barang →</button>}</div>}
+    </section>
+    {editingListing && <div className="seller-modal-bg product-workspace-modal-bg"><form className="seller-modal listing-edit-modal product-workspace-modal" onSubmit={saveListing}><div className="modal-head"><div><span className="seller-kicker">JUALAN / LISTING</span><h2>Edit {marketplaceStatusLabel(editingListing.marketplace)}</h2></div><button type="button" aria-label="Tutup edit listing" onClick={() => setEditingListing(null)}>×</button></div><label>Status<select value={editingListing.listing_status} onChange={(event) => setEditingListing({ ...editingListing, listing_status: event.target.value })}>{LISTING_STATUSES.map((status) => <option key={status} value={status}>{marketplaceStatusLabel(status)}</option>)}</select></label><label>Harga listing<input type="number" min="0" inputMode="numeric" value={editingListing.listed_price ?? ''} onChange={(event) => setEditingListing({ ...editingListing, listed_price: event.target.value })} /></label><label>URL listing<input type="text" inputMode="url" autoComplete="url" value={editingListing.listing_url || ''} onChange={(event) => setEditingListing({ ...editingListing, listing_url: event.target.value })} placeholder="https://…" /></label><div className="seller-form-actions"><button className="seller-primary">Simpan perubahan</button><button type="button" className="seller-secondary" onClick={() => setEditingListing(null)}>Batal</button></div></form></div>}
+  </div>
 }
-function SalesPage() {
-  const [sales, setSales] = useState([]); const [message, setMessage] = useState('')
-  useEffect(() => { async function load() { if (!supabase) return; const { data, error } = await supabase.from('sales').select('*, products(name,brand,sku)').order('sold_at', { ascending: false }); if (error) setMessage(errorText(error)); else setSales(data || []) }; load() }, [])
+
+function SalesPage({ onOpenProduct }) {
+  const [sales, setSales] = useState([])
+  const [message, setMessage] = useState('')
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    async function load() {
+      if (!supabase) { setSales([]); setLoading(false); return }
+      const { data, error } = await supabase.from('sales').select('*, products(name,brand,sku,image_urls)').order('sold_at', { ascending: false })
+      if (error) setMessage(errorText(error)); else setSales(data || [])
+      setLoading(false)
+    }
+    void load()
+  }, [])
   const totals = sales.reduce((acc, sale) => ({ revenue: acc.revenue + Number(sale.sale_price || 0), net: acc.net + Number(sale.net_profit || 0) }), { revenue: 0, net: 0 })
-  return <div><SellerHeader eyebrow="REVENUE / PROFIT" title="Terjual" copy="Sales are recorded from the master inventory SOLD flow." />{message && <Notice tone="error">{message}</Notice>}<section className="seller-finance-grid"><Metric label="Recorded revenue" value={moneyIdr(totals.revenue)} /><Metric label="Recorded net profit" value={moneyIdr(totals.net)} /></section><section className="seller-panel"><PanelTitle eyebrow="SALES LEDGER" title={`${sales.length} recorded sales`} />{sales.length ? <div className="sales-list">{sales.map((sale) => <a className="sale-row" key={sale.id} href={`/seller/inventory/${sale.product_id}`} onClick={(event) => { event.preventDefault(); go(`/seller/inventory/${sale.product_id}`) }}><div><strong>{sale.products?.sku || 'SKU'} · {sale.products?.brand} {sale.products?.name}</strong><span>{titleCaseStatus(sale.sold_via)} · {dateLabel(sale.sold_at)}</span></div><div><b>{moneyIdr(sale.sale_price)}</b><small>Net {moneyIdr(sale.net_profit)}</small></div></a>)}</div> : <div className="seller-empty"><strong>NO SALES RECORDED</strong><p>Sold items will appear here.</p></div>}</section></div>
+  return <div className="jualan-sales-page">
+    {message && <div role="alert"><Notice tone="error">{message}</Notice></div>}
+    <section className="seller-finance-grid jualan-finance-grid"><Metric label="Pendapatan tercatat" value={moneyIdr(totals.revenue)} /><Metric label="Laba bersih tercatat" value={moneyIdr(totals.net)} /></section>
+    <section className="seller-panel">
+      <PanelTitle eyebrow="CATATAN TRANSAKSI" title={`${sales.length} transaksi`} />
+      {loading ? <div className="seller-empty" role="status"><span className="seller-spinner" /><p>Memuat transaksi…</p></div> : sales.length ? <div className="sales-list jualan-sales-list">{sales.map((sale) => <article className="jualan-sale-card" key={sale.id}>
+        <div className="jualan-sale-main">
+          <button type="button" className="listing-action-link" onClick={() => onOpenProduct(sale.product_id)}>Buka barang <span aria-hidden="true">→</span></button>
+          <strong>{[sale.products?.sku, productDisplayTitle(sale.products || {})].filter(Boolean).join(' · ')}</strong>
+          <span>{marketplaceStatusLabel(sale.sold_via)} · {dateLabel(sale.sold_at)}</span>
+        </div>
+        <div className="jualan-sale-money"><span>Harga terjual</span><strong>{moneyIdr(sale.sale_price)}</strong></div>
+        <div className="jualan-sale-profits"><ProductDetailFact label="Laba kotor" value={moneyIdr(sale.gross_profit)} /><ProductDetailFact label="Laba bersih" value={moneyIdr(sale.net_profit)} /></div>
+        <details className="jualan-sale-costs"><summary>Rincian biaya</summary><div><ProductDetailFact label="Modal" value={moneyIdr(sale.purchase_price)} /><ProductDetailFact label="Biaya marketplace" value={moneyIdr(sale.marketplace_fee)} /><ProductDetailFact label="Biaya pembayaran" value={moneyIdr(sale.payment_fee)} /><ProductDetailFact label="Subsidi ongkir" value={moneyIdr(sale.shipping_subsidy)} /><ProductDetailFact label="Biaya lain" value={moneyIdr(sale.other_cost)} /></div></details>
+      </article>)}</div> : <div className="seller-empty"><strong>Belum ada transaksi terjual.</strong><p>Transaksi akan tampil di sini setelah barang dicatat terjual.</p></div>}
+    </section>
+  </div>
 }
 
 function AIUsagePage() {
@@ -744,4 +873,3 @@ function SettingsPage() {
   async function save(event) { event.preventDefault(); setBusy(true); const { error } = await supabase.from('app_settings').upsert({ key: 'ai_monthly_budget', value: { amount: Number(budget || 0), currency: 'IDR' }, updated_at: new Date().toISOString() }); setMessage(error ? errorText(error) : 'Monthly AI budget updated.'); setBusy(false) }
   return <div><SellerHeader eyebrow="ADMIN / CONFIGURATION" title="AI & Anggaran" copy="Small operational settings that affect seller workflows." /><form className="seller-panel settings-form" onSubmit={save}><PanelTitle eyebrow="AI GUARDRAIL" title="Monthly budget" /><p className="seller-muted">The server-side AI budget guard blocks paid calls when usage reaches this amount. Default: Rp100.000.</p><Field label="Monthly AI budget (IDR)" value={budget} onChange={setBudget} type="number" required /><div className="seller-form-actions"><button className="seller-primary" disabled={busy}>{busy ? 'Saving…' : 'Save settings'}</button></div>{message && <Notice tone={message.includes('updated') ? 'success' : 'error'}>{message}</Notice>}</form><section className="seller-panel"><PanelTitle eyebrow="FUTURE INTEGRATIONS" title="Telegram contract" /><p className="seller-muted">The future endpoint is documented in <code>docs/SELLER_PANEL.md</code>. It will require authenticated server-to-server access and will create master inventory records before any downstream action.</p></section></div>
 }
-
