@@ -63,7 +63,7 @@ function App(){
   let page
   if(path==='/') page=<Home products={products} loading={loading} catalogError={catalogError} onRetry={loadPublicProducts} />
   else if(path==='/shop') page=<Shop products={products} loading={loading} catalogError={catalogError} onRetry={loadPublicProducts} />
-  else if(path==='/archive') page=<Archive products={products} loading={loading} catalogError={catalogError} />
+  else if(path==='/archive') page=<Archive products={products} loading={loading} catalogError={catalogError} onRetry={loadPublicProducts} />
   else if(path==='/about') page=<About />
   else if(path==='/shipping') page=<Shipping />
   else if(path==='/staff' || path==='/admin/login') page=<StaffLogin />
@@ -234,10 +234,10 @@ function Shop({products,loading,catalogError,onRetry}){
     {loading?<ProductGridSkeleton label="Memuat katalog"/>:catalogError?<CatalogUnavailable onRetry={onRetry}/>:filtered.length?<div className="grid public-product-grid">{filtered.map(product=><Card p={product} key={product.id}/>)}</div>:<Empty text="Belum ada barang yang cocok. Coba ubah kata kunci atau status."/>}
   </PageIntro>
 }
-function Archive({products,loading,catalogError}){
+function Archive({products,loading,catalogError,onRetry}){
   const sold=filterAndSortPublicProducts(products,{status:'sold'})
   return <PageIntro eyebrow="HAQLOOKS HISTORY" title="THE ARCHIVE" copy="Pasangan yang sudah menemukan pemilik baru tetap menjadi bagian dari cerita Haqlooks.">
-    {loading?<ProductGridSkeleton label="Memuat arsip"/>:catalogError?<CatalogUnavailable/>:sold.length?<div className="grid public-product-grid">{sold.map(product=><Card p={product} key={product.id}/>)}</div>:<Empty text="Belum ada pasangan terjual di arsip."/>}
+    {loading?<ProductGridSkeleton label="Memuat arsip"/>:catalogError?<CatalogUnavailable onRetry={onRetry}/>:sold.length?<div className="grid public-product-grid">{sold.map(product=><Card p={product} key={product.id}/>)}</div>:<Empty text="Belum ada pasangan terjual di arsip."/>}
   </PageIntro>
 }
 function About(){ return <PageIntro eyebrow="ABOUT HAQLOOKS" title={<>MORE THAN<br/>SNEAKERS.</>} copy="HAQLOOKS is a curated pre-owned sneaker store from Indonesia. We give iconic pairs a second home and build a bigger community around sneakers, style, and stories."><div className="editorial">{[['01','Curated with character.','Every pair should feel selected, not mass listed.'],['02','Photos before promises.','Pre-owned shopping works best when buyers can inspect the pair clearly.'],['03','Indonesia to anywhere.','Built for local and international buyers with worldwide shipping support.']].map(x=><article key={x[0]}><span>{x[0]}</span><h2>{x[1]}</h2><p>{x[2]}</p></article>)}</div></PageIntro> }

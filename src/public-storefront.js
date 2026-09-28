@@ -45,8 +45,10 @@ export function filterAndSortPublicProducts(products, { query = '', status = 'al
   })
 
   const price = (product) => {
-    const value = Number(product.price_idr)
-    return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY
+    const raw = product.price_idr
+    if (raw === null || raw === undefined || String(raw).trim() === '') return null
+    const value = Number(raw)
+    return Number.isFinite(value) ? value : null
   }
   const created = (product) => {
     const value = Date.parse(product.created_at || '')
@@ -54,8 +56,14 @@ export function filterAndSortPublicProducts(products, { query = '', status = 'al
   }
 
   return filtered.sort((a, b) => {
-    if (sort === 'price-asc') return price(a) - price(b)
-    if (sort === 'price-desc') return price(b) - price(a)
+    if (sort === 'price-asc' || sort === 'price-desc') {
+      const priceA = price(a)
+      const priceB = price(b)
+      if (priceA === null && priceB !== null) return 1
+      if (priceA !== null && priceB === null) return -1
+      if (priceA === null && priceB === null) return 0
+      return sort === 'price-asc' ? priceA - priceB : priceB - priceA
+    }
     return created(b) - created(a)
   })
 }

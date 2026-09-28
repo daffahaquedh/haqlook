@@ -130,7 +130,7 @@
 
 .public-detail-layout { width: min(1320px, calc(100% - 48px)); display: grid; grid-template-columns: minmax(0,1.08fr) minmax(340px,.78fr); align-items: start; gap: clamp(24px, 4vw, 64px); padding-block: 42px calc(54px + env(safe-area-inset-bottom)); }
 .public-gallery { min-width: 0; }
-.public-gallery-track { display: flex; width: 100%; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; scrollbar-width: none; touch-action: pan-x; }
+.public-gallery-track { display: flex; width: 100%; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; scrollbar-width: none; }
 .public-gallery-track::-webkit-scrollbar { display: none; }
 .public-gallery-slide { flex: 0 0 100%; min-width: 0; aspect-ratio: 1 / .92; display: grid; place-items: center; overflow: hidden; scroll-snap-align: start; border: 1px solid rgba(240,229,204,.12); background: #0e100f; }
 .public-gallery-slide img { width: 100%; height: 100%; object-fit: contain; }

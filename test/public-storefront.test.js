@@ -39,6 +39,26 @@ test('public catalog supports search, real status filters, and safe sort choices
   assert.deepEqual(filterAndSortPublicProducts(products).map((p) => p.slug), ['pair-latest', 'pair-sold', 'pair-cheaper'])
 })
 
+test('missing or invalid prices sort after priced products in either direction', () => {
+  const withMissingPrices = [
+    { slug: 'missing', name: 'Missing price' },
+    { slug: 'costly', name: 'Costly', price_idr: 1500000 },
+    { slug: 'blank', name: 'Blank price', price_idr: '  ' },
+    { slug: 'cheap', name: 'Cheap', price_idr: '800000' },
+    { slug: 'invalid', name: 'Invalid price', price_idr: 'unknown' },
+    { slug: 'null', name: 'Null price', price_idr: null },
+  ]
+
+  assert.deepEqual(
+    filterAndSortPublicProducts(withMissingPrices, { sort: 'price-asc' }).map((product) => product.slug),
+    ['cheap', 'costly', 'missing', 'blank', 'invalid', 'null'],
+  )
+  assert.deepEqual(
+    filterAndSortPublicProducts(withMissingPrices, { sort: 'price-desc' }).map((product) => product.slug),
+    ['costly', 'cheap', 'missing', 'blank', 'invalid', 'null'],
+  )
+})
+
 test('WhatsApp context contains only public product identity and URL', () => {
   const url = publicProductUrl('https://haqlooks.my.id/', 'runner-latest')
   assert.equal(url, 'https://haqlooks.my.id/product/runner-latest')
@@ -53,6 +73,18 @@ test('catalog keeps the safe public projection and avoids misleading fallback fl
   assert.match(mainSource, /select\('id,slug,name,brand,model,price_idr,price_usd,size_label,condition,description,status,is_published,image_urls,created_at'\)/)
   assert.doesNotMatch(mainSource, /select\('\*'\)/)
   assert.doesNotMatch(mainSource, /fallbackProducts/)
+})
+
+test('Archive retries catalog loading through the existing safe handler', () => {
+  assert.match(mainSource, /path==='\/archive'\) page=<Archive[^\n]*onRetry=\{loadPublicProducts\}/)
+  assert.match(mainSource, /function Archive\(\{products,loading,catalogError,onRetry\}\)/)
+  assert.match(mainSource, /catalogError\?<CatalogUnavailable onRetry=\{onRetry\}\/\>:sold\.length/)
+})
+
+test('public gallery keeps browser-native touch behavior', () => {
+  const galleryRule = stylesSource.match(/\.public-gallery-track\s*\{[^}]*\}/)?.[0] || ''
+  assert.match(galleryRule, /overflow-x:\s*auto/)
+  assert.doesNotMatch(galleryRule, /touch-action/)
 })
 
 test('cards have no fake wishlist control and Phase 1 staff entry stays present', () => {
