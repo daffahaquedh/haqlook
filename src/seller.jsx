@@ -488,12 +488,12 @@ function ProductPhotoPicker({ existingUrls = [], photos = [], photoBusy = false,
         {existingUrls.map((url, index) => <div className="photo-preview saved" key={'saved-' + url}>
           <img src={url} alt={'Foto barang tersimpan ' + (index + 1)} loading="lazy" />
           <span className="photo-preview-kind">Tersimpan</span>
-          <button type="button" aria-label={'Keluarkan foto ' + (index + 1) + ' dari barang'} onClick={() => onRemoveExisting?.(url)}>×</button>
+          <button type="button" aria-label={'Keluarkan foto ' + (index + 1) + ' dari barang'} onClick={() => onRemoveExisting?.(url)} disabled={disabled || photoBusy}>×</button>
         </div>)}
         {photos.map((photo, index) => <div className="photo-preview new" key={photo.id}>
           <img src={photo.preview} alt={'Pratinjau foto baru ' + (index + 1)} />
           <span className="photo-preview-kind">Foto baru</span>
-          <button type="button" aria-label={'Hapus foto baru ' + (index + 1)} onClick={() => onRemovePhoto?.(photo.id)}>×</button>
+          <button type="button" aria-label={'Hapus foto baru ' + (index + 1)} onClick={() => onRemovePhoto?.(photo.id)} disabled={disabled || photoBusy}>×</button>
         </div>)}
         {!count && <div className="photo-empty"><strong>Belum ada foto</strong><span>Foto terang dan tajam membantu pemeriksaan label, jahitan, motif, serta kondisi.</span></div>}
       </div>

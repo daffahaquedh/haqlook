@@ -78,6 +78,7 @@ test('Gallery and camera remain separate, capped, and explicit photo operations'
   assert.match(photoSource, /URL\.revokeObjectURL/)
   assert.match(photoSource, /Batas 10 foto per barang/)
   assert.match(photoSource, /role="alert"/)
+  assert.equal((photoSource.match(/disabled=\{disabled \|\| photoBusy\}/g) || []).length, 2)
   assert.match(editSource, /onRemoveExisting=\{\(url\) => setRemovedPhotos/)
   assert.match(editSource, /Foto dikeluarkan dari daftar barang; file asli tetap disimpan/)
   assert.match(editSource, /Batalkan/)
