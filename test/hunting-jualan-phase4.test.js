@@ -65,7 +65,7 @@ test('Terjual avoids false zero totals during loading/errors and keeps retry', (
 
 test('Terjual identifies each transaction with its stored product image, channel, and date', () => {
   assert.match(salesSource, /imageFor\(sale\.products \|\| \{\}\).*loading="lazy"/)
-  assert.match(salesSource, /marketplaceStatusLabel\(sale\.sold_via\) · \{dateLabel\(sale\.sold_at\)\}/)
+  assert.match(salesSource, /marketplaceStatusLabel\(sale\.sold_via\)\} · \{dateLabel\(sale\.sold_at\)\}/)
   assert.match(sellerStyles, /\.jualan-sale-main>img\{display:block;width:52px;height:52px/)
 })
 
