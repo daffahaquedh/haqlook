@@ -1187,7 +1187,7 @@ function SalesPage({ onOpenProduct }) {
   useEffect(() => { void load() }, [])
   const totals = sales.reduce((acc, sale) => ({ revenue: acc.revenue + Number(sale.sale_price || 0), net: acc.net + Number(sale.net_profit || 0) }), { revenue: 0, net: 0 })
   return <div className="jualan-sales-page">
-    {!loading && !loadError && <section className="seller-finance-grid jualan-finance-grid"><Metric label="Pendapatan tercatat" value={moneyIdr(totals.revenue)} /><Metric label="Laba bersih tercatat" value={moneyIdr(totals.net)} /></section>
+    {!loading && !loadError && <section className="seller-finance-grid jualan-finance-grid"><Metric label="Pendapatan tercatat" value={moneyIdr(totals.revenue)} /><Metric label="Laba bersih tercatat" value={moneyIdr(totals.net)} /></section>}
     <section className="seller-panel">
       <PanelTitle eyebrow="CATATAN TRANSAKSI" title={`${sales.length} transaksi`} />
       {loading ? <div className="seller-empty" role="status"><span className="seller-spinner" /><p>Memuat transaksi…</p></div> : loadError ? <div className="seller-empty jualan-load-error" role="alert"><strong>Transaksi belum bisa dimuat.</strong><p>{loadError}</p><button type="button" className="seller-secondary compact" onClick={() => void load()}>Coba lagi</button></div> : sales.length ? <div className="sales-list jualan-sales-list">{sales.map((sale) => <article className="jualan-sale-card" key={sale.id}>
