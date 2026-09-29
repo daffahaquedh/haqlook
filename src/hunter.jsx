@@ -508,14 +508,14 @@ export function HunterAnalyticsPage() {
   const [data, setData] = useState(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(true)
-  useEffect(() => { async function load() { if (!supabase) { setError('Supabase belum dikonfigurasi.'); setBusy(false); return }; const { data: result, error: rpcError } = await supabase.rpc('hunter_admin_analytics'); if (rpcError) setError(errorMessage(rpcError, 'Analytics belum bisa dimuat.')); else setData(result); setBusy(false) }; void load() }, [])
+  useEffect(() => { async function load() { if (!supabase) { setError('Supabase belum dikonfigurasi.'); setBusy(false); return }; const { data: result, error: rpcError } = await supabase.rpc('hunter_admin_analytics'); if (rpcError) setError(errorMessage(rpcError, 'Analitik belum bisa dimuat.')); else setData(result); setBusy(false) }; void load() }, [])
   const kpis = [
-    ['Destination briefs', data?.brief_count || 0],
-    ['Research refreshes', data?.refresh_count || 0],
-    ['Item checks', data?.item_check_count || 0],
-    ['Hunter AI cost', moneyIdr(data?.hunter_cost_idr || 0)],
+    ['Riset destinasi', data?.brief_count || 0],
+    ['Pembaruan riset', data?.refresh_count || 0],
+    ['Cek barang', data?.item_check_count || 0],
+    ['Biaya AI Hunter', moneyIdr(data?.hunter_cost_idr || 0)],
   ]
-  return <section className="hunter-analytics"><header><small>ADMIN ONLY · THIS MONTH</small><h1>Hunter Analytics</h1><p>Aggregated sourcing engagement. No buyer or seller PII is shown.</p></header>{error && <div className="hunter-error" role="alert">{error}</div>}{busy ? <p>Loading Hunter analytics…</p> : <><div className="hunter-analytics-kpis">{kpis.map(([label, value]) => <article key={label}><small>{label}</small><strong>{value}</strong></article>)}</div><div className="hunter-analytics-grid"><AnalyticsList title="Most requested destinations" items={data?.most_requested_destinations} /><AnalyticsList title="Most recommended categories" items={data?.most_recommended_categories} /><AnalyticsList title="Conversion" items={[{ label: 'Checked → Bought', value: `${data?.checked_to_bought?.bought || 0} / ${data?.checked_to_bought?.checked || 0}` }, { label: 'Bought → Sold', value: `${data?.bought_to_sold?.sold || 0} / ${data?.bought_to_sold?.bought || 0}` }]} /></div></>}</section>
+  return <section className="hunter-analytics"><header><small>ADMIN · BULAN INI</small><h1>Analitik Hunter</h1><p>Ringkasan agregat aktivitas riset dan sourcing. Data pribadi pembeli maupun penjual tidak ditampilkan.</p></header>{error && <div className="hunter-error" role="alert">{error}</div>}{busy ? <p role="status">Memuat analitik Hunter…</p> : <><div className="hunter-analytics-kpis">{kpis.map(([label, value]) => <article key={label}><small>{label}</small><strong>{value}</strong></article>)}</div><div className="hunter-analytics-grid"><AnalyticsList title="Destinasi paling sering diriset" items={data?.most_requested_destinations} /><AnalyticsList title="Kategori rekomendasi terbanyak" items={data?.most_recommended_categories} /><AnalyticsList title="Konversi status" items={[{ label: 'Dicek → Dibeli', value: `${data?.checked_to_bought?.bought || 0} / ${data?.checked_to_bought?.checked || 0}` }, { label: 'Dibeli → Terjual', value: `${data?.bought_to_sold?.sold || 0} / ${data?.bought_to_sold?.bought || 0}` }]} /></div></>}</section>
 }
 
 function AnalyticsList({ title, items = [] }) {
