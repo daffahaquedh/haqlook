@@ -625,3 +625,17 @@
 .store-contact-state{min-height:100px;display:grid;place-items:center;border:1px solid #29352e;background:#111613;color:#aab7ad}
 .store-contact-retry{margin-top:10px}
 @media(max-width:700px){.store-contact-layout{grid-template-columns:minmax(0,1fr)}.store-contact-form,.store-contact-preview{padding:15px}.store-contact-form .seller-form-actions{position:sticky;bottom:calc(66px + env(safe-area-inset-bottom));z-index:5;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.7fr);padding:8px 0 calc(6px + env(safe-area-inset-bottom));background:#111613}.store-contact-form .seller-form-actions button{min-height:48px;padding-inline:8px;font-size:.7rem}}
+/* Phase 4: make saved-find sources and Terjual product identity easy to scan. */
+.sourcing-source-link{display:inline-flex;align-items:center;gap:6px;min-width:0;min-height:44px;padding:0 2px;color:#df9b55;font-size:.68rem;font-weight:800;line-height:1.35;text-decoration:underline;text-underline-offset:3px;overflow-wrap:anywhere}
+.sourcing-load-error .seller-secondary,.jualan-load-error .seller-secondary{min-height:44px;margin-top:4px}
+.jualan-sale-main{grid-template-columns:52px minmax(0,1fr) auto;align-items:center;gap:8px 12px}
+.jualan-sale-main>img{display:block;width:52px;height:52px;aspect-ratio:1;object-fit:cover;background:#090b09}
+.jualan-sale-identity{display:grid;gap:4px;min-width:0}
+.jualan-sale-main .listing-action-link{min-height:44px;padding-inline:6px;white-space:normal}
+@media(max-width:700px){
+  .sourcing-source-link{min-height:44px}
+  .jualan-sale-main{grid-template-columns:48px minmax(0,1fr);gap:6px 9px}
+  .jualan-sale-main>img{grid-column:1;grid-row:1;width:48px;height:48px}
+  .jualan-sale-identity{grid-column:2;grid-row:1}
+  .jualan-sale-main .listing-action-link{grid-column:2;grid-row:2;justify-self:start;padding-inline:0}
+}
