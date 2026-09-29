@@ -113,8 +113,8 @@ test('Seller responsive rules cover compact tablets, iOS safe area, keyboard, an
 })
 
 test('hidden photo picker inputs stay narrow inside full-width inventory forms', () => {
-  const inputRule = sellerCss.match(/\\.inventory-form input[^{}]*\\{[^}]*\\}/)?.[0]
+  const inputRule = sellerCss.match(/\.inventory-form input[^{}]*\{[^}]*\}/)?.[0]
   assert.ok(inputRule, 'inventory form input sizing rule should exist')
-  assert.match(inputRule, /input:not\\(\\.photo-picker-input\\)/)
-  assert.match(sellerCss, /\\.photo-picker-input\\{[^}]*width:1px/)
+  assert.match(inputRule, /input:not\(\.photo-picker-input\)/)
+  assert.match(sellerCss, /\.photo-picker-input\{[^}]*width:1px/)
 })
