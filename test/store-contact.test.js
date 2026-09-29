@@ -14,7 +14,7 @@ const [mainSource, sellerSource, utilsSource, migration, sellerCss] = await Prom
   read('../src/main.jsx'),
   read('../src/seller.jsx'),
   read('../src/seller-utils.js'),
-  read('../supabase/migrations/20260929120000_storefront_contact_settings.sql'),
+  read('../supabase/migrations/20260929131147_storefront_contact_settings.sql'),
   read('../src/seller.css'),
 ])
 
