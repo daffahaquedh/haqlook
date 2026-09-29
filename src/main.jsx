@@ -15,8 +15,7 @@ import {
   publicPurchaseAction,
   publicStatusLabel,
 } from './public-storefront.js'
-
-const WHATSAPP = import.meta.env.VITE_WHATSAPP_NUMBER || ''
+import { resolveStorefrontContact } from './store-contact.js'
 
 function money(value){ return new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(Number(value||0)) }
 function route(){ return window.location.pathname || '/' }
@@ -28,10 +27,25 @@ function App(){
   const [loading,setLoading]=useState(true)
   const [catalogError,setCatalogError]=useState(false)
   const [staffEntry,setStaffEntry]=useState('checking')
+  const [storeContact,setStoreContact]=useState(null)
   const isOperations=path==='/staff' || path.startsWith('/admin') || path.startsWith('/seller')
 
   useEffect(()=>{ const fn=()=>setPath(route()); addEventListener('popstate',fn); return()=>removeEventListener('popstate',fn) },[])
   useEffect(()=>{ loadPublicProducts() },[])
+  useEffect(()=>{
+    let active=true
+    async function loadStoreContact(){
+      if(!supabase){if(active)setStoreContact(null);return}
+      try {
+        const {data,error}=await supabase.from('storefront_contact_settings').select('whatsapp_number,instagram_url').eq('id',1).maybeSingle()
+        if(active)setStoreContact(error?null:data||null)
+      } catch {
+        if(active)setStoreContact(null)
+      }
+    }
+    void loadStoreContact()
+    return()=>{active=false}
+  },[])
   useEffect(()=>{
     if(isOperations || !supabase){setStaffEntry('anonymous');return}
     let active=true
@@ -69,7 +83,7 @@ function App(){
   else if(path==='/staff' || path==='/admin/login') page=<StaffLogin />
   else if(path==='/admin') page=<SellerApp path={path} />
   else if(path==='/seller' || path.startsWith('/seller/')) page=<SellerApp path={path} />
-  else if(path.startsWith('/product/')) page=<ProductDetail product={products.find(p=>p.slug===decodeURIComponent(path.split('/').pop()))} loading={loading} catalogError={catalogError} onRetry={loadPublicProducts} />
+  else if(path.startsWith('/product/')) page=<ProductDetail product={products.find(p=>p.slug===decodeURIComponent(path.split('/').pop()))} loading={loading} catalogError={catalogError} onRetry={loadPublicProducts} contactSettings={storeContact} />
   else page=<NotFound />
 
   return isOperations?<>{page}</>:<><Nav path={path} staffEntry={staffEntry}/>{page}<Footer staffEntry={staffEntry}/></>
@@ -246,18 +260,18 @@ function Shipping(){ return <PageIntro eyebrow="SHIPS FROM INDONESIA" title="WOR
 function PageIntro({eyebrow,title,copy,children}){ return <main className="page"><section className="shell intro"><p className="eyebrow orange">{eyebrow}</p><h1>{title}</h1><p>{copy}</p></section><section className="shell section">{children}</section></main> }
 function Empty({text}){ return <div className="empty"><b>{text}</b></div> }
 
-function ProductDetail({product,loading,catalogError,onRetry}){
+function ProductDetail({product,loading,catalogError,onRetry,contactSettings}){
   if(!product){
     if(loading)return <main className="page"><div className="shell public-detail-loading" role="status">Memuat detail barang…</div></main>
     if(catalogError)return <main className="page"><div className="shell section"><CatalogUnavailable onRetry={onRetry}/></div></main>
     return <NotFound/>
   }
 
-  const phone=WHATSAPP.replace(/\D/g,'')
-  const action=publicPurchaseAction(product.status,Boolean(phone))
+  const contact=resolveStorefrontContact(contactSettings)
+  const action=publicPurchaseAction(product.status,Boolean(contact.whatsappNumber))
   const productUrl=publicProductUrl(window.location.origin,product.slug)
   const message=encodeURIComponent(buildWhatsAppProductMessage(product,productUrl))
-  const contactUrl=phone?`https://wa.me/${phone}?text=${message}`:'https://www.instagram.com/haqlook/'
+  const contactUrl=contact.primaryType==='whatsapp'?`${contact.primaryUrl}?text=${message}`:contact.primaryUrl
   const normalizedStatus=String(product.status||'').toLowerCase()
 
   return <main className="page public-product-page">
@@ -283,7 +297,7 @@ function ProductDetail({product,loading,catalogError,onRetry}){
           <h2 id="condition-title">Kondisi & detail</h2>
           <p className="public-product-description">{product.description||'Silakan periksa foto barang dan tanyakan detail kondisi sebelum membeli.'}</p>
         </section>
-        <a className="btn outline wide public-secondary-cta" href="https://www.instagram.com/haqlook/" target="_blank" rel="noreferrer">Tanya lewat Instagram <span aria-hidden="true">↗</span></a>
+        <a className="btn outline wide public-secondary-cta" href={contact.instagramUrl} target="_blank" rel="noreferrer">Tanya lewat Instagram <span aria-hidden="true">↗</span></a>
         {normalizedStatus==='sold'?<p className="public-archive-note">Pasangan ini sudah terjual dan ditampilkan sebagai arsip.</p>:null}
         <Link to="/shop" className="textlink back">← KEMBALI KE TOKO</Link>
       </aside>
