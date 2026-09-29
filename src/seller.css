@@ -523,7 +523,7 @@
 .pagination span{color:#9aa69d;font-size:.75rem;text-align:center}
 .seller-form-section{min-width:0;scroll-margin-block:90px}
 .inventory-form label{font-size:.75rem;line-height:1.35}
-.inventory-form input,.inventory-form select,.inventory-form textarea{width:100%;min-width:0;font-size:16px}
+.inventory-form input:not(.photo-picker-input),.inventory-form select,.inventory-form textarea{width:100%;min-width:0;font-size:16px}
 .photo-form-section{scroll-margin-block:90px}
 .photo-preview-grid{align-content:start}
 .photo-preview-kind{position:absolute;right:5px;bottom:5px;max-width:calc(100% - 10px);padding:4px 6px;background:rgba(10,14,11,.88);color:#e6e9e2;font-size:.68rem;line-height:1.2;overflow-wrap:anywhere}
