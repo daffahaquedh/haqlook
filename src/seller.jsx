@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { HunterAnalyticsPage, HunterChatPage } from './hunter'
 import { AI_ENABLED, supabase } from './supabase-client'
 import ListingGenerator from './listing-generator'
+import { normalizeInstagramProfile, normalizeWhatsAppNumber, resolveStorefrontContact } from './store-contact.js'
 import StaffLogin from './staff-auth.jsx'
 import './product-detail.css'
 import {
@@ -128,7 +129,8 @@ function SellerWorkspace({ path, profile, onLogout }) {
   if (!canAccessWorkspaceSection(profile.role, section)) page = <AccessDenied />
   else if (['analytics', 'hunter-analytics', 'ai-usage'].includes(section) && profile.role === 'ADMIN') page = <AdminInsightWorkspace path={workspacePath} />
   else if (['settings', 'users-roles', 'marketplace-settings', 'app-settings'].includes(section) && profile.role === 'ADMIN') page = <AdminSettingsWorkspace path={workspacePath} />
-  if (section === 'inventory' && id === 'new') page = <NewInventory />
+  if (section === 'store-contact') page = <StoreContactPage />
+  else if (section === 'inventory' && id === 'new') page = <NewInventory />
   else if (section === 'inventory' && id && subSection === 'edit') page = <EditInventory id={id} />
   else if (section === 'inventory' && id) page = <InventoryDetail id={id} />
   else if (section === 'inventory') page = <InventoryPage />
@@ -1192,6 +1194,142 @@ function AIUsagePage() {
   useEffect(() => { async function load() { if (!supabase) return; const [{ data: usage, error }, { data: records }] = await Promise.all([supabase.rpc('seller_ai_usage_summary'), supabase.from('ai_usage').select('*').order('created_at', { ascending: false }).limit(30)]); if (error) setMessage(errorText(error)); else setSummary(usage); setLogs(records || []) }; load() }, [])
   const tone = budgetTone(summary?.used || 0, summary?.budget || 0)
   return <div><SellerHeader eyebrow="AI FOUNDATION" title="Penggunaan AI" copy="Usage is tracked server-side. Inventory and seller operations continue when the AI budget is empty." />{message && <Notice tone="warning">{message}</Notice>}<section className="ai-budget-card"><div><span className="seller-kicker">MONTHLY BUDGET</span><strong>{moneyIdr(summary?.used || 0)} <small>/ {moneyIdr(summary?.budget || 100000)}</small></strong><p>{budgetLabel(summary?.used || 0, summary?.budget || 100000)}</p></div><div className={`big-budget-percent ${tone}`}>{Math.round(summary?.percentage || 0)}%</div></section>{!AI_ENABLED && <Notice tone="info">AI belum dikonfigurasi. Set VITE_AI_ENABLED=true only after deploying the server-side Supabase function with OPENAI_API_KEY.</Notice>}<section className="seller-panel"><PanelTitle eyebrow="RECENT EVENTS" title="Usage log" />{logs.length ? <div className="usage-list">{logs.map((log) => <div className="usage-row" key={log.id}><div><strong>{titleCaseStatus(log.feature)}</strong><span>{log.model || 'model unknown'} · {dateLabel(log.created_at)}</span></div><div><b>{moneyIdr(log.estimated_cost)}</b><small>{Number(log.input_tokens || 0) + Number(log.output_tokens || 0)} tokens</small></div></div>)}</div> : <div className="seller-empty"><strong>NO AI USAGE</strong><p>There are no server-side AI calls recorded this month.</p></div>}</section></div>
+}
+
+function StoreContactPage() {
+  const empty = { whatsapp_number: '', instagram_url: '' }
+  const [form, setForm] = useState(empty)
+  const [initial, setInitial] = useState(empty)
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState('')
+  const [noticeTone, setNoticeTone] = useState('info')
+
+  async function loadContact() {
+    setLoading(true)
+    setLoadError(false)
+    setNotice('')
+    if (!supabase) {
+      setLoadError(true)
+      setLoading(false)
+      return
+    }
+    try {
+      const { data, error } = await supabase
+        .from('storefront_contact_settings')
+        .select('whatsapp_number,instagram_url')
+        .eq('id', 1)
+        .maybeSingle()
+      if (error || !data) {
+        setLoadError(true)
+        setLoading(false)
+        return
+      }
+      const loaded = {
+        whatsapp_number: data.whatsapp_number || '',
+        instagram_url: data.instagram_url || '',
+      }
+      setForm(loaded)
+      setInitial(loaded)
+      setLoading(false)
+    } catch {
+      setLoadError(true)
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { void loadContact() }, [])
+
+  async function saveContact(event) {
+    event.preventDefault()
+    if (busy || loading || loadError || !supabase) return
+
+    const whatsapp = normalizeWhatsAppNumber(form.whatsapp_number)
+    if (form.whatsapp_number.trim() && !whatsapp) {
+      setNoticeTone('error')
+      setNotice('Nomor WhatsApp tidak valid. Gunakan nomor Indonesia seperti 0812…, 62812…, atau +62812….')
+      return
+    }
+    const instagram = normalizeInstagramProfile(form.instagram_url)
+    if (form.instagram_url.trim() && !instagram) {
+      setNoticeTone('error')
+      setNotice('Instagram tidak valid. Masukkan @username atau tautan profil Instagram yang aman.')
+      return
+    }
+
+    setNotice('')
+    setBusy(true)
+    try {
+      const { data, error } = await supabase
+        .from('storefront_contact_settings')
+        .update({
+          whatsapp_number: whatsapp || null,
+          instagram_url: instagram || null,
+        })
+        .eq('id', 1)
+        .select('id,whatsapp_number,instagram_url')
+        .maybeSingle()
+
+      if (error || !data) {
+        setNoticeTone('error')
+        setNotice('Perubahan belum tersimpan. Periksa akses akun dan pastikan konfigurasi database tersedia.')
+      } else {
+        const saved = {
+          whatsapp_number: data.whatsapp_number || '',
+          instagram_url: data.instagram_url || '',
+        }
+        setForm(saved)
+        setInitial(saved)
+        setNoticeTone('success')
+        setNotice('Kontak toko berhasil diperbarui.')
+      }
+    } catch {
+      setNoticeTone('error')
+      setNotice('Koneksi bermasalah. Kontak toko belum tersimpan.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const preview = resolveStorefrontContact({
+    whatsapp_number: form.whatsapp_number,
+    instagram_url: form.instagram_url,
+  })
+
+  return <div className="store-contact-page">
+    <SellerHeader eyebrow="LAINNYA / KONTAK TOKO" title="Kontak Toko" copy="Kontak ini digunakan calon pembeli dari etalase HAQLOOKS." />
+    {loading && <div className="store-contact-state" role="status">Memuat kontak toko…</div>}
+    {loadError && <Notice tone="error" role="alert">
+      Kontak toko belum dapat dimuat. Formulir dinonaktifkan sampai konfigurasi database tersedia.
+      <button type="button" className="seller-secondary compact store-contact-retry" onClick={() => { void loadContact() }}>Coba lagi</button>
+    </Notice>}
+    {!loading && !loadError && <div className="store-contact-layout">
+      <form className="seller-panel store-contact-form" onSubmit={saveContact} aria-busy={busy}>
+        <PanelTitle eyebrow="KONTAK PUBLIK" title="Cara pembeli menghubungi toko" />
+        <label>WhatsApp
+          <input type="tel" inputMode="tel" autoComplete="tel" value={form.whatsapp_number} onChange={(event) => { setForm({ ...form, whatsapp_number: event.target.value }); setNotice('') }} placeholder="0812 3456 7890" />
+        </label>
+        <small className="store-contact-help">Nomor Indonesia akan disimpan dalam format internasional. Kosongkan jika tidak digunakan.</small>
+        <label>Instagram
+          <input type="text" autoCapitalize="none" autoComplete="url" value={form.instagram_url} onChange={(event) => { setForm({ ...form, instagram_url: event.target.value }); setNotice('') }} placeholder="@haqlooks atau https://www.instagram.com/haqlooks/" />
+        </label>
+        <small className="store-contact-help">Boleh memakai @username atau tautan profil Instagram.</small>
+        {notice && <Notice tone={noticeTone} role={noticeTone === 'error' ? 'alert' : 'status'}>{notice}</Notice>}
+        <div className="seller-form-actions">
+          <button className="seller-primary" disabled={busy || loading}>{busy ? 'Menyimpan…' : 'Simpan perubahan'}</button>
+          <button type="button" className="seller-secondary" disabled={busy} onClick={() => { setForm(initial); setNotice('') }}>Batal</button>
+        </div>
+      </form>
+      <aside className="seller-panel store-contact-preview" aria-live="polite">
+        <span className="seller-kicker">PRATINJAU SETELAH DISIMPAN</span>
+        <h2>Kontak utama saat ini</h2>
+        <strong>{preview.primaryType === 'whatsapp' ? 'WhatsApp' : 'Instagram'}</strong>
+        <p>{preview.primaryType === 'whatsapp' ? 'Pembeli akan diarahkan ke WhatsApp.' : 'WhatsApp kosong; Instagram menjadi kontak utama.'}</p>
+        <a href={preview.primaryUrl} target="_blank" rel="noreferrer">{preview.primaryType === 'whatsapp' ? 'Buka pratinjau WhatsApp' : 'Buka pratinjau Instagram'} ↗</a>
+      </aside>
+    </div>}
+  </div>
 }
 
 function SettingsPage() {
