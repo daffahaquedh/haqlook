@@ -170,6 +170,7 @@
 }
 @media (min-width: 761px) and (max-width: 819px) {
   .public-product-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .nav-inner { gap: 12px; }
 }
 @media (min-width: 761px) and (max-width: 1050px) {
   .home .hero-layout { grid-template-columns: minmax(0,.9fr) minmax(0,1fr); gap: clamp(10px,2vw,20px); min-height: clamp(350px,56vw,460px); }
