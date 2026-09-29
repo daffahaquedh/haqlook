@@ -956,14 +956,22 @@ function SourcingPage({ embedded = false, onOpenProduct = () => {}, onOpenResear
   const [message, setMessage] = useState('')
   const [messageTone, setMessageTone] = useState('info')
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [purchasePrices, setPurchasePrices] = useState({})
   const [movingId, setMovingId] = useState('')
   const [form, setForm] = useState({ title: '', brand: '', category: '', source_platform: '', source_url: '', seller_asking_price: '', estimated_resale_min: '', estimated_resale_max: '', max_buy_price: '', condition: '', authenticity_risk: '', opportunity_score: '', notes: '', status: 'WATCHING' })
 
   async function load() {
-    if (!supabase) { setLoading(false); return }
+    if (!supabase) {
+      setItems([])
+      setLoadError('Koneksi data belum tersedia.')
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    setLoadError('')
     const { data, error } = await supabase.from('sourcing_candidates').select('*').order('created_at', { ascending: false })
-    if (error) { setMessage(errorText(error)); setMessageTone('error') }
+    if (error) setLoadError(errorText(error, 'Temuan tersimpan belum bisa dimuat.'))
     else setItems(data || [])
     setLoading(false)
   }
@@ -1052,18 +1060,21 @@ function SourcingPage({ embedded = false, onOpenProduct = () => {}, onOpenResear
     </form>}
     <section className="sourcing-list" aria-label="Daftar temuan tersimpan" aria-busy={loading}>
       {loading && <div className="seller-empty" role="status"><span className="seller-spinner" /><p>Memuat temuan tersimpan…</p></div>}
-      {!loading && items.map((candidate) => {
+      {!loading && loadError && <div className="seller-empty sourcing-load-error" role="alert"><strong>Temuan tersimpan belum bisa dimuat.</strong><p>{loadError}</p><button type="button" className="seller-secondary compact" onClick={() => void load()}>Coba lagi</button></div>}
+      {!loading && !loadError && items.map((candidate) => {
         const converted = sourcingCandidateIsInInventory(candidate)
         const canMove = sourcingCandidateCanMoveToInventory(candidate)
         const hasAskingPrice = Number(candidate.seller_asking_price) > 0
         const hasMaxBuy = Number(candidate.max_buy_price) > 0
         const hasResaleRange = Number(candidate.estimated_resale_min) > 0 && Number(candidate.estimated_resale_max) > 0
         const score = Number(candidate.opportunity_score)
+        const sourceUrl = safeHttpUrl(candidate.source_url)
         return <article className="sourcing-card" key={candidate.id}>
           <div className="sourcing-card-head">
             <div className="sourcing-card-title"><span className="sku">{candidate.source_platform || 'Asal belum dicatat'}</span><h2>{candidate.title || 'Temuan tanpa nama'}</h2><p>{[candidate.category, candidate.brand].filter(Boolean).join(' · ') || 'Kategori dan merek belum dicatat'}</p></div>
             <div className="sourcing-card-badges"><b className={`sourcing-status ${String(candidate.status).toLowerCase()}`}>{sourcingCandidateStatusLabel(candidate.status)}</b><span className={`opportunity ${score >= 70 ? 'high' : score >= 40 ? 'check' : score > 0 ? 'skip' : 'empty'}`}>{score > 0 ? `Peluang ${score}` : 'Belum dinilai'}</span></div>
           </div>
+          {sourceUrl && <a className="sourcing-source-link" href={sourceUrl} target="_blank" rel="noreferrer">Buka sumber <span aria-hidden="true">↗</span></a>}
           <div className="sourcing-card-meta">
             <span>Harga diminta<strong>{hasAskingPrice ? moneyIdr(candidate.seller_asking_price) : 'Belum dicatat'}</strong></span>
             <span>Batas modal<strong>{hasMaxBuy ? moneyIdr(candidate.max_buy_price) : 'Belum ditetapkan'}</strong></span>
@@ -1075,7 +1086,7 @@ function SourcingPage({ embedded = false, onOpenProduct = () => {}, onOpenResear
           {canMove && <div className="move-inventory"><label><span>Harga beli final</span><input type="number" min="1" inputMode="numeric" value={purchasePrices[candidate.id] || candidate.seller_asking_price || ''} onChange={(event) => setPurchasePrices({ ...purchasePrices, [candidate.id]: event.target.value })} placeholder="Masukkan modal akhir" /></label><button type="button" className="seller-primary compact" disabled={Boolean(movingId)} aria-busy={movingId === candidate.id} onClick={() => void moveToInventory(candidate)}>{movingId === candidate.id ? 'Memasukkan…' : 'Masukkan ke Barang →'}</button></div>}
         </article>
       })}
-      {!loading && !items.length && <div className="seller-empty sourcing-empty"><strong>Belum ada temuan tersimpan.</strong><p>Simpan target dari Riset untuk memantaunya di sini.</p><button type="button" className="seller-primary compact" onClick={onOpenResearch}>Mulai Riset →</button></div>}
+      {!loading && !loadError && !items.length && <div className="seller-empty sourcing-empty"><strong>Belum ada temuan tersimpan.</strong><p>Simpan target dari Riset untuk memantaunya di sini.</p><button type="button" className="seller-primary compact" onClick={onOpenResearch}>Mulai Riset →</button></div>}
     </section>
   </div>
 }
@@ -1086,14 +1097,16 @@ function ListingsPage({ onOpenProduct }) {
   const [editingListing, setEditingListing] = useState(null)
   const [loading, setLoading] = useState(true)
   const [message, setMessage] = useState(null)
+  const [loadError, setLoadError] = useState('')
 
   async function load() {
-    if (!supabase) { setProducts([]); setLoading(false); return }
+    if (!supabase) { setProducts([]); setLoadError('Koneksi data belum tersedia.'); setLoading(false); return }
     setLoading(true)
+    setLoadError('')
     const { data, error } = await supabase.from('products')
       .select('id,name,brand,sku,image_urls,status,created_at,marketplace_listings(*),sales(sold_via)')
       .order('created_at', { ascending: false })
-    if (error) setMessage({ tone: 'error', text: errorText(error) })
+    if (error) setLoadError(errorText(error, 'Listing belum bisa dimuat.'))
     else setProducts(data || [])
     setLoading(false)
   }
@@ -1129,7 +1142,7 @@ function ListingsPage({ onOpenProduct }) {
       <PanelTitle eyebrow="STATUS MARKETPLACE" title="Listing barang" />
       <nav className="listing-status-filters" aria-label="Filter status listing">{filters.map(([value, label]) => <button key={value} type="button" aria-pressed={filter === value} className={filter === value ? 'active' : ''} onClick={() => setFilter(value)}>{label}{value === 'needs-review' ? <span className="sr-only"> barang terjual yang perlu diperiksa</span> : null}</button>)}</nav>
       <div className="listing-results-count" aria-live="polite">{visibleRows.length} barang</div>
-      {loading ? <div className="seller-empty" role="status"><span className="seller-spinner" /><p>Memuat listing…</p></div> : visibleRows.length ? <div className="listing-table">{visibleRows.map((listing) => {
+      {loading ? <div className="seller-empty" role="status"><span className="seller-spinner" /><p>Memuat listing…</p></div> : loadError ? <div className="seller-empty jualan-load-error" role="alert"><strong>Listing belum bisa dimuat.</strong><p>{loadError}</p><button type="button" className="seller-secondary compact" onClick={() => void load()}>Coba lagi</button></div> : visibleRows.length ? <div className="listing-table">{visibleRows.map((listing) => {
         const product = listing.products || {}
         const safeUrl = safeHttpUrl(listing.listing_url)
         const needsReview = listingNeedsReview(listing)
@@ -1158,28 +1171,33 @@ function ListingsPage({ onOpenProduct }) {
 
 function SalesPage({ onOpenProduct }) {
   const [sales, setSales] = useState([])
-  const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(true)
-  useEffect(() => {
-    async function load() {
-      if (!supabase) { setSales([]); setLoading(false); return }
-      const { data, error } = await supabase.from('sales').select('*, products(name,brand,sku,image_urls)').order('sold_at', { ascending: false })
-      if (error) setMessage(errorText(error)); else setSales(data || [])
-      setLoading(false)
-    }
-    void load()
-  }, [])
+  const [loadError, setLoadError] = useState('')
+
+  async function load() {
+    if (!supabase) { setSales([]); setLoadError('Koneksi data belum tersedia.'); setLoading(false); return }
+    setLoading(true)
+    setLoadError('')
+    const { data, error } = await supabase.from('sales').select('*, products(name,brand,sku,image_urls)').order('sold_at', { ascending: false })
+    if (error) setLoadError(errorText(error, 'Transaksi belum bisa dimuat.'))
+    else setSales(data || [])
+    setLoading(false)
+  }
+
+  useEffect(() => { void load() }, [])
   const totals = sales.reduce((acc, sale) => ({ revenue: acc.revenue + Number(sale.sale_price || 0), net: acc.net + Number(sale.net_profit || 0) }), { revenue: 0, net: 0 })
   return <div className="jualan-sales-page">
-    {message && <div role="alert"><Notice tone="error">{message}</Notice></div>}
-    <section className="seller-finance-grid jualan-finance-grid"><Metric label="Pendapatan tercatat" value={moneyIdr(totals.revenue)} /><Metric label="Laba bersih tercatat" value={moneyIdr(totals.net)} /></section>
+    {!loading && !loadError && <section className="seller-finance-grid jualan-finance-grid"><Metric label="Pendapatan tercatat" value={moneyIdr(totals.revenue)} /><Metric label="Laba bersih tercatat" value={moneyIdr(totals.net)} /></section>
     <section className="seller-panel">
       <PanelTitle eyebrow="CATATAN TRANSAKSI" title={`${sales.length} transaksi`} />
-      {loading ? <div className="seller-empty" role="status"><span className="seller-spinner" /><p>Memuat transaksi…</p></div> : sales.length ? <div className="sales-list jualan-sales-list">{sales.map((sale) => <article className="jualan-sale-card" key={sale.id}>
+      {loading ? <div className="seller-empty" role="status"><span className="seller-spinner" /><p>Memuat transaksi…</p></div> : loadError ? <div className="seller-empty jualan-load-error" role="alert"><strong>Transaksi belum bisa dimuat.</strong><p>{loadError}</p><button type="button" className="seller-secondary compact" onClick={() => void load()}>Coba lagi</button></div> : sales.length ? <div className="sales-list jualan-sales-list">{sales.map((sale) => <article className="jualan-sale-card" key={sale.id}>
         <div className="jualan-sale-main">
+          <img src={imageFor(sale.products || {})} alt="" loading="lazy" />
+          <div className="jualan-sale-identity">
+            <strong>{[sale.products?.sku, productDisplayTitle(sale.products || {})].filter(Boolean).join(' · ')}</strong>
+            <span>{marketplaceStatusLabel(sale.sold_via)} · {dateLabel(sale.sold_at)}</span>
+          </div>
           <button type="button" className="listing-action-link" onClick={() => onOpenProduct(sale.product_id)}>Buka barang <span aria-hidden="true">→</span></button>
-          <strong>{[sale.products?.sku, productDisplayTitle(sale.products || {})].filter(Boolean).join(' · ')}</strong>
-          <span>{marketplaceStatusLabel(sale.sold_via)} · {dateLabel(sale.sold_at)}</span>
         </div>
         <div className="jualan-sale-money"><span>Harga terjual</span><strong>{moneyIdr(sale.sale_price)}</strong></div>
         <div className="jualan-sale-profits"><ProductDetailFact label="Laba kotor" value={moneyIdr(sale.gross_profit)} /><ProductDetailFact label="Laba bersih" value={moneyIdr(sale.net_profit)} /></div>
