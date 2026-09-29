@@ -99,6 +99,7 @@ export const ITEM_ANALYSIS_SUGGESTIONS = [
 
 export const SELLER_WORKSPACE_GROUPS = [
   { label: 'OPERASIONAL', links: [['/seller', 'Beranda', '⌂'], ['/seller/inventory', 'Barang', '▣'], ['/seller/ai-hunter', 'Hunting', '✦'], ['/seller/listings', 'Jualan', '↗']] },
+  { label: 'LAINNYA', links: [['/seller/store-contact', 'Kontak Toko', '◇']] },
 ]
 
 export const ADMIN_WORKSPACE_GROUPS = [
@@ -129,6 +130,7 @@ export const SELLER_MOBILE_PRIMARY_LINKS = [
 
 export const SELLER_MOBILE_MORE_GROUPS = [
   { label: 'JUALAN', links: [['/seller/sales', 'Terjual', '◎']] },
+  { label: 'LAINNYA', links: [['/seller/store-contact', 'Kontak Toko', '◇']] },
 ]
 
 export const ADMIN_MOBILE_MORE_GROUPS = [
