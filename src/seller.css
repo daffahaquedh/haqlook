@@ -608,3 +608,20 @@
 }
 
 @media(prefers-reduced-motion:reduce){.dashboard-quick-action{transition:none}}
+
+/* Phase 3B: Seller-managed public contact settings. */
+.store-contact-page{width:min(100%,1040px);min-width:0;margin-inline:auto}
+.store-contact-layout{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(220px,.8fr);gap:14px;align-items:start}
+.store-contact-form{display:grid;gap:9px;min-width:0}
+.store-contact-form>label{display:grid;gap:7px;color:#dce4dc;font-size:.78rem;font-weight:800}
+.store-contact-form input{width:100%;min-width:0;min-height:48px;border:1px solid #38463e;border-radius:3px;background:#0b0f0c;color:#ece5d7;padding:11px 12px;font:inherit;font-size:16px;outline:none}
+.store-contact-form input:focus{border-color:#2fa38c;box-shadow:0 0 0 3px rgba(47,163,140,.12)}
+.store-contact-help{margin:-3px 0 7px;color:#96a399;font-size:.72rem;line-height:1.45}
+.store-contact-preview{min-width:0}
+.store-contact-preview h2{margin:12px 0;color:#efe6d2;font:900 1.45rem/1.05 Georgia,'Times New Roman',serif}
+.store-contact-preview>strong{display:inline-flex;min-height:36px;align-items:center;border:1px solid #315d4f;background:#14251f;color:#9be0c0;padding:0 12px;font-size:.8rem}
+.store-contact-preview p{color:#aab3aa;font-size:.76rem;line-height:1.5}
+.store-contact-preview>a{display:inline-flex;min-height:44px;align-items:center;color:#e0a15e;font-size:.76rem;font-weight:800;overflow-wrap:anywhere}
+.store-contact-state{min-height:100px;display:grid;place-items:center;border:1px solid #29352e;background:#111613;color:#aab7ad}
+.store-contact-retry{margin-top:10px}
+@media(max-width:700px){.store-contact-layout{grid-template-columns:minmax(0,1fr)}.store-contact-form,.store-contact-preview{padding:15px}.store-contact-form .seller-form-actions{position:sticky;bottom:calc(66px + env(safe-area-inset-bottom));z-index:5;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,.7fr);padding:8px 0 calc(6px + env(safe-area-inset-bottom));background:#111613}.store-contact-form .seller-form-actions button{min-height:48px;padding-inline:8px;font-size:.7rem}}
