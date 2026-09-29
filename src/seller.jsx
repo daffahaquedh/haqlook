@@ -340,72 +340,190 @@ function DashboardTaskCard({ title, count, items, href, action }) { return <arti
 function PanelTitle({ eyebrow, title, href }) { return <div className="seller-panel-title"><div><span className="seller-kicker">{eyebrow}</span><h2>{title}</h2></div>{href && <a href={href} onClick={(event) => { event.preventDefault(); go(href) }}>Lihat semua →</a>}</div> }
 
 function InventoryPage() {
-  const [items, setItems] = useState([]); const [count, setCount] = useState(0); const [filters, setFilters] = useState({ q: '', status: '', brand: '', sort: 'newest' }); const [page, setPage] = useState(0); const [message, setMessage] = useState(''); const pageSize = 20
+  const [items, setItems] = useState([])
+  const [count, setCount] = useState(0)
+  const [filters, setFilters] = useState({ q: '', status: '', brand: '', sort: 'newest' })
+  const [page, setPage] = useState(0)
+  const [message, setMessage] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [retryKey, setRetryKey] = useState(0)
+  const pageSize = 20
+
   useEffect(() => {
+    let active = true
     async function load() {
-      if (!supabase) return
-      let query = supabase.from('products').select('*', { count: 'exact' })
-      if (filters.q) query = query.or(`sku.ilike.%${filters.q}%,name.ilike.%${filters.q}%,brand.ilike.%${filters.q}%`)
-      if (filters.status) query = query.eq('status', filters.status)
-      if (filters.brand) query = query.ilike('brand', `%${filters.brand}%`)
-      query = query.order(filters.sort === 'oldest' ? 'created_at' : filters.sort === 'capital' ? 'purchase_price' : 'created_at', { ascending: filters.sort === 'oldest' })
-      const { data, count: total, error } = await query.range(page * pageSize, (page + 1) * pageSize - 1)
-      if (error) setMessage(errorText(error)); else { setItems(data || []); setCount(total || 0); setMessage('') }
+      setLoading(true)
+      setMessage('')
+      if (!supabase) {
+        if (active) { setMessage('Koneksi database belum dikonfigurasi.'); setLoading(false) }
+        return
+      }
+      try {
+        let query = supabase.from('products').select('*', { count: 'exact' })
+        if (filters.q) query = query.or(`sku.ilike.%${filters.q}%,name.ilike.%${filters.q}%,brand.ilike.%${filters.q}%`)
+        if (filters.status) query = query.eq('status', filters.status)
+        if (filters.brand) query = query.ilike('brand', `%${filters.brand}%`)
+        query = query.order(filters.sort === 'oldest' ? 'created_at' : filters.sort === 'capital' ? 'purchase_price' : 'created_at', { ascending: filters.sort === 'oldest' })
+        const { data, count: total, error } = await query.range(page * pageSize, (page + 1) * pageSize - 1)
+        if (!active) return
+        if (error) { setItems([]); setCount(0); setMessage(errorText(error, 'Daftar barang belum dapat dimuat.')) }
+        else { setItems(data || []); setCount(total || 0) }
+      } catch (error) {
+        if (active) { setItems([]); setCount(0); setMessage(errorText(error, 'Daftar barang belum dapat dimuat.')) }
+      } finally {
+        if (active) setLoading(false)
+      }
     }
     load()
-  }, [filters, page])
+    return () => { active = false }
+  }, [filters, page, retryKey])
+
   function update(key, value) { setPage(0); setFilters((current) => ({ ...current, [key]: value })) }
-  return <div><SellerHeader eyebrow="OPERASIONAL / BARANG" title="Barang" copy="Satu SKU untuk satu sumber data. Kelola semua channel dari daftar ini." action={<a href="/seller/inventory/new" className="seller-primary compact" onClick={(event) => { event.preventDefault(); go('/seller/inventory/new') }}>＋ Tambah barang</a>} />{message && <Notice tone="error">{message}</Notice>}<section className="inventory-toolbar"><input value={filters.q} onChange={(event) => update('q', event.target.value)} placeholder="Cari SKU, merek, atau nama barang…" /><select value={filters.status} onChange={(event) => update('status', event.target.value)}><option value="">Semua status</option>{INVENTORY_STATUSES.map((status) => <option key={status} value={status}>{inventoryStatusLabel(status)}</option>)}</select><input value={filters.brand} onChange={(event) => update('brand', event.target.value)} placeholder="Filter merek" /><select value={filters.sort} onChange={(event) => update('sort', event.target.value)}><option value="newest">Terbaru</option><option value="oldest">Terlama</option><option value="capital">Modal tertinggi</option></select></section><div className="inventory-count" aria-live="polite">{count} barang · halaman {page + 1}</div><section className="inventory-list">{items.length ? items.map((item) => <InventoryCard key={item.id} item={item} />) : <div className="seller-empty"><strong>Belum ada barang.</strong><p>Tambahkan barang pertama atau sesuaikan filter.</p></div>}</section><div className="pagination"><button type="button" disabled={page === 0} onClick={() => setPage((value) => value - 1)}>← Sebelumnya</button><button type="button" disabled={(page + 1) * pageSize >= count} onClick={() => setPage((value) => value + 1)}>Berikutnya →</button></div></div>
+  return <main className="inventory-page">
+    <SellerHeader eyebrow="OPERASIONAL / BARANG" title="Barang" copy="Satu SKU untuk satu sumber data. Kelola semua channel dari daftar ini." action={<a href="/seller/inventory/new" className="seller-primary compact" onClick={(event) => { event.preventDefault(); go('/seller/inventory/new') }}>＋ Tambah barang</a>} />
+    <section className="inventory-toolbar" aria-label="Cari dan filter barang">
+      <input type="search" aria-label="Cari SKU, merek, atau nama barang" value={filters.q} onChange={(event) => update('q', event.target.value)} placeholder="Cari SKU, merek, atau nama barang…" />
+      <select aria-label="Filter status barang" value={filters.status} onChange={(event) => update('status', event.target.value)}><option value="">Semua status</option>{INVENTORY_STATUSES.map((status) => <option key={status} value={status}>{inventoryStatusLabel(status)}</option>)}</select>
+      <input aria-label="Filter merek" value={filters.brand} onChange={(event) => update('brand', event.target.value)} placeholder="Filter merek" />
+      <select aria-label="Urutkan barang" value={filters.sort} onChange={(event) => update('sort', event.target.value)}><option value="newest">Terbaru</option><option value="oldest">Terlama</option><option value="capital">Modal tertinggi</option></select>
+    </section>
+    <div className="inventory-count" aria-live="polite">{loading ? 'Memuat daftar barang…' : `${count} barang · halaman ${page + 1}`}</div>
+    <section className="inventory-list" aria-label="Daftar barang">
+      {loading ? <div className="inventory-state" role="status">Memuat barang…</div>
+        : message ? <div className="seller-empty" role="alert"><strong>Daftar barang belum tersedia.</strong><p>{message}</p><button className="seller-secondary" type="button" onClick={() => setRetryKey((key) => key + 1)}>Coba lagi</button></div>
+          : items.length ? items.map((item) => <InventoryCard key={item.id} item={item} />)
+            : <div className="seller-empty"><strong>Belum ada barang yang cocok.</strong><p>Tambahkan barang pertama atau sesuaikan filter.</p></div>}
+    </section>
+    <nav className="pagination" aria-label="Halaman daftar barang"><button type="button" disabled={loading || page === 0} onClick={() => setPage((value) => value - 1)}>← Sebelumnya</button><span>Halaman {page + 1}</span><button type="button" disabled={loading || (page + 1) * pageSize >= count} onClick={() => setPage((value) => value + 1)}>Berikutnya →</button></nav>
+  </main>
 }
 
-function InventoryCard({ item }) { return <a href={`/seller/inventory/${item.id}`} className="inventory-card" onClick={(event) => { event.preventDefault(); go(`/seller/inventory/${item.id}`) }}><img src={imageFor(item)} alt="" /><div className="inventory-card-main"><div className="inventory-card-top"><span className="sku">{item.sku || 'SKU belum tersedia'}</span><span className={`inventory-status ${item.status}`}>{inventoryStatusLabel(item.status)}</span></div><h2>{item.brand} {item.name}</h2><p>{item.size_label || 'Ukuran belum diisi'} · {item.condition || 'Kondisi belum diisi'}</p><div className="inventory-card-bottom"><strong>{moneyIdr(item.purchase_price)}</strong><span>Harga jual {moneyIdr(item.suggested_price || item.price_idr)}</span></div></div></a> }
+function InventoryCard({ item }) {
+  const publicPrice = item.suggested_price || item.price_idr
+  return <a href={`/seller/inventory/${item.id}`} className="inventory-card" aria-label={`Buka barang ${productDisplayTitle(item)}, status ${inventoryStatusLabel(item.status)}`} onClick={(event) => { event.preventDefault(); go(`/seller/inventory/${item.id}`) }}>
+    <img src={imageFor(item)} alt="" loading="lazy" />
+    <div className="inventory-card-main">
+      <div className="inventory-card-top"><span className="sku">{item.sku || 'SKU belum tersedia'}</span><span className={`inventory-status ${String(item.status || '').toLowerCase()}`}>{inventoryStatusLabel(item.status)}</span></div>
+      <h2>{productDisplayTitle(item)}</h2>
+      <p>{item.size_label || 'Ukuran belum diisi'} <span aria-hidden="true">·</span> {item.condition || 'Kondisi belum diisi'}</p>
+      <div className="inventory-card-bottom">
+        <span><small>Modal</small><strong>{moneyIdr(item.purchase_price)}</strong></span>
+        <span><small>Harga jual</small><strong>{moneyIdr(publicPrice)}</strong></span>
+      </div>
+    </div>
+  </a>
+}
 
-function NewInventory() {
-  const [form, setForm] = useState({ brand: '', name: '', category: '', subcategory: '', size_label: '', condition: 'Good', condition_notes: '', defects: '', purchase_price: '', suggested_price: '', minimum_price: '', source: '', source_url: '', purchase_date: today(), status: 'draft', description: '' })
-  const [photos, setPhotos] = useState([]); const photosRef = useRef([])
-  const [message, setMessage] = useState(''); const [photoMessage, setPhotoMessage] = useState(''); const [photoBusy, setPhotoBusy] = useState(false); const [busy, setBusy] = useState(false)
-  const cameraPicker = useRef(null); const galleryPicker = useRef(null)
-  function set(key, value) { setForm((current) => ({ ...current, [key]: value })) }
+function useProductPhotoDraft() {
+  const [photos, setPhotos] = useState([])
+  const [photoBusy, setPhotoBusy] = useState(false)
+  const [photoMessage, setPhotoMessage] = useState('')
+  const photosRef = useRef([])
+
   function replacePhotos(next) {
     const keep = new Set(next.map((photo) => photo.preview))
     photosRef.current.forEach((photo) => { if (!keep.has(photo.preview)) URL.revokeObjectURL(photo.preview) })
     photosRef.current = next
     setPhotos(next)
   }
+
   useEffect(() => () => photosRef.current.forEach((photo) => URL.revokeObjectURL(photo.preview)), [])
 
-  async function chooseFiles(event) {
+  async function chooseFiles(event, existingCount = 0) {
     const input = event.currentTarget
     const selected = [...(input.files || [])]
     input.value = ''
     setPhotoMessage('')
     if (!selected.length) return
 
-    const { files: available, omitted } = takeAvailablePhotos(photosRef.current.length, selected)
-    const limitMessage = omitted ? `Maksimal ${MAX_PRODUCT_PHOTOS} foto. ${omitted} foto tidak ditambahkan.` : ''
+    const { files: available, omitted } = takeAvailablePhotos(existingCount + photosRef.current.length, selected)
+    const limitMessage = omitted ? 'Batas 10 foto per barang. ' + omitted + ' foto tidak ditambahkan.' : ''
     if (limitMessage) setPhotoMessage(limitMessage)
     if (!available.length) return
 
     setPhotoBusy(true)
-    const prepared = []; const errors = []
-    for (const candidate of available) {
-      try { prepared.push(await prepareProductPhoto(candidate)) }
-      catch (error) { errors.push(error.message || 'Foto tidak dapat diproses.') }
+    const prepared = []
+    const errors = []
+    try {
+      for (const candidate of available) {
+        try { prepared.push(await prepareProductPhoto(candidate)) }
+        catch (error) { errors.push(error.message || 'Foto tidak dapat diproses.') }
+      }
+      const additions = []
+      for (const file of prepared) {
+        try { additions.push({ id: crypto.randomUUID(), file, preview: URL.createObjectURL(file) }) }
+        catch { errors.push('Pratinjau foto tidak dapat dibuat di browser ini.') }
+      }
+      replacePhotos([...photosRef.current, ...additions])
+      if (errors.length) setPhotoMessage([limitMessage, ...errors].filter(Boolean).join(' '))
+    } catch (error) {
+      setPhotoMessage(error.message || 'Foto tidak dapat diproses. Silakan pilih ulang.')
+    } finally {
+      setPhotoBusy(false)
     }
-    const additions = prepared.map((file) => ({ id: crypto.randomUUID(), file, preview: URL.createObjectURL(file) }))
-    replacePhotos([...photosRef.current, ...additions])
-    if (errors.length) setPhotoMessage([limitMessage, ...errors].filter(Boolean).join(' '))
-    setPhotoBusy(false)
   }
 
   function removePhoto(photoId) {
     replacePhotos(photosRef.current.filter((photo) => photo.id !== photoId))
   }
+
+  function resetPhotos() {
+    replacePhotos([])
+    setPhotoMessage('')
+  }
+
+  return { photos, photoBusy, photoMessage, chooseFiles, removePhoto, resetPhotos, setPhotoMessage }
+}
+
+function ProductPhotoPicker({ existingUrls = [], photos = [], photoBusy = false, photoMessage = '', activity = '', disabled = false, onFilesSelected, onRemovePhoto, onRemoveExisting }) {
+  const cameraPicker = useRef(null)
+  const galleryPicker = useRef(null)
+  const count = existingUrls.length + photos.length
+  const pickerDisabled = disabled || photoBusy || count >= MAX_PRODUCT_PHOTOS
+  return <section className="seller-panel seller-form-section photo-form-section" aria-label="Foto barang" data-form-section="photos">
+    <PanelTitle eyebrow="01 / FOTO BARANG" title="Foto barang" />
+    <p className="photo-picker-copy">Ambil foto atau pilih beberapa foto dari galeri. Pastikan label, jahitan, motif, dan kondisi terlihat jelas.</p>
+    <div className="photo-uploader">
+      <div className="photo-preview-grid">
+        {existingUrls.map((url, index) => <div className="photo-preview saved" key={'saved-' + url}>
+          <img src={url} alt={'Foto barang tersimpan ' + (index + 1)} loading="lazy" />
+          <span className="photo-preview-kind">Tersimpan</span>
+          <button type="button" aria-label={'Keluarkan foto ' + (index + 1) + ' dari barang'} onClick={() => onRemoveExisting?.(url)} disabled={disabled || photoBusy}>×</button>
+        </div>)}
+        {photos.map((photo, index) => <div className="photo-preview new" key={photo.id}>
+          <img src={photo.preview} alt={'Pratinjau foto baru ' + (index + 1)} />
+          <span className="photo-preview-kind">Foto baru</span>
+          <button type="button" aria-label={'Hapus foto baru ' + (index + 1)} onClick={() => onRemovePhoto?.(photo.id)} disabled={disabled || photoBusy}>×</button>
+        </div>)}
+        {!count && <div className="photo-empty"><strong>Belum ada foto</strong><span>Foto terang dan tajam membantu pemeriksaan label, jahitan, motif, serta kondisi.</span></div>}
+      </div>
+      <div className="photo-picker-actions">
+        <input className="photo-picker-input" {...CAMERA_PICKER_PROPS} ref={cameraPicker} aria-label="Ambil foto barang dengan kamera" tabIndex={-1} onChange={onFilesSelected} />
+        <input className="photo-picker-input" {...GALLERY_PICKER_PROPS} ref={galleryPicker} aria-label="Pilih foto barang dari galeri" tabIndex={-1} onChange={onFilesSelected} />
+        <button className="photo-picker-action" type="button" onClick={() => cameraPicker.current?.click()} disabled={pickerDisabled}><span>📷 Ambil foto</span><small>Buka kamera belakang</small></button>
+        <button className="photo-picker-action gallery" type="button" onClick={() => galleryPicker.current?.click()} disabled={pickerDisabled}><span>🖼 Pilih dari galeri</span><small>Pilih satu atau beberapa foto</small></button>
+        <div className="photo-count" aria-live="polite">{count} / {MAX_PRODUCT_PHOTOS} foto dipilih{photoBusy && <b> · Memproses foto…</b>}{activity && <b role="status"> · {activity}</b>}</div>
+        {photoMessage && <p className="photo-picker-error" role="alert">{photoMessage}</p>}
+      </div>
+    </div>
+  </section>
+}
+
+function NewInventory() {
+  const [form, setForm] = useState({ brand: '', name: '', category: '', subcategory: '', size_label: '', condition: 'Good', condition_notes: '', defects: '', purchase_price: '', suggested_price: '', minimum_price: '', source: '', source_url: '', purchase_date: today(), status: 'draft', description: '' })
+  const { photos, photoBusy, photoMessage, chooseFiles, removePhoto } = useProductPhotoDraft()
+  const [message, setMessage] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [uploadMessage, setUploadMessage] = useState('')
+  function set(key, value) { setForm((current) => ({ ...current, [key]: value })) }
+
   async function upload() {
     const urls = []
-    for (const { file } of photosRef.current) {
+    for (let index = 0; index < photos.length; index += 1) {
+      setUploadMessage('Mengunggah foto ' + (index + 1) + ' dari ' + photos.length + '…')
+      const { file } = photos[index]
       const extension = productPhotoExtension(file)
-      const path = `inventory/${crypto.randomUUID()}.${extension}`
+      const path = 'inventory/' + crypto.randomUUID() + '.' + extension
       const contentType = file.type || (extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : 'image/jpeg')
       const { error } = await supabase.storage.from('product-images').upload(path, file, { upsert: false, contentType })
       if (error) throw error
@@ -413,36 +531,80 @@ function NewInventory() {
     }
     return urls
   }
+
   async function save(event) {
-    event.preventDefault(); setMessage('')
-    if (photoBusy) return
+    event.preventDefault()
+    if (busy || photoBusy) return
+    setMessage('')
+    setUploadMessage('')
     if (!supabase) { setMessage('Koneksi database belum dikonfigurasi.'); return }
     if (form.source_url && !safeHttpUrl(form.source_url)) { setMessage('Tautan sumber harus diawali http:// atau https://.'); return }
     setBusy(true)
     try {
       const imageUrls = await upload()
-      const payload = { ...form, slug: `${form.brand}-${form.name}-${Date.now()}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''), price_idr: Number(form.suggested_price || 0), purchase_price: Number(form.purchase_price || 0), suggested_price: Number(form.suggested_price || 0), minimum_price: Number(form.minimum_price || 0), image_urls: imageUrls, is_published: form.status === 'available', featured: false, model: null, price_usd: null, size_label: form.size_label || null, condition_notes: form.condition_notes || null, defects: form.defects || null, source: form.source || null, source_url: form.source_url ? safeHttpUrl(form.source_url) : null, description: form.description || null }
+      const payload = { ...form, slug: (form.brand + '-' + form.name + '-' + Date.now()).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''), price_idr: Number(form.suggested_price || 0), purchase_price: Number(form.purchase_price || 0), suggested_price: Number(form.suggested_price || 0), minimum_price: Number(form.minimum_price || 0), image_urls: imageUrls, is_published: form.status === 'available', featured: false, model: null, price_usd: null, size_label: form.size_label || null, condition_notes: form.condition_notes || null, defects: form.defects || null, source: form.source || null, source_url: form.source_url ? safeHttpUrl(form.source_url) : null, description: form.description || null }
       const { data, error } = await supabase.from('products').insert(payload).select('id').single()
       if (error) throw error
-      go(`/seller/inventory/${data.id}`)
-    } catch (error) { setMessage(errorText(error, 'Barang belum dapat disimpan. Silakan coba lagi.')) }
-    setBusy(false)
+      go('/seller/inventory/' + data.id)
+    } catch (error) {
+      setMessage(errorText(error, 'Barang belum dapat disimpan. Periksa koneksi foto, lalu coba lagi.'))
+    } finally {
+      setBusy(false)
+      setUploadMessage('')
+    }
   }
-  return <div><SellerHeader eyebrow="BARANG / TAMBAH" title="Tambah barang" copy="Catat barang di HAQLOOKS sebelum dianalisis atau disiapkan untuk dijual." action={<button className="seller-secondary compact" type="button" onClick={() => go('/seller/inventory')}>Batal</button>} />{message && <Notice tone="error">{message}</Notice>}<form className="seller-form" onSubmit={save}>
-    <section className="seller-panel"><PanelTitle eyebrow="01 / FOTO BARANG" title="Foto barang" /><p className="photo-picker-copy">Ambil foto atau pilih beberapa foto dari galeri. Pastikan label, jahitan, motif, dan kondisi terlihat jelas.</p><div className="photo-uploader"><div className="photo-preview-grid">{photos.length ? photos.map((photo, index) => <div className="photo-preview" key={photo.id}><img src={photo.preview} alt={`Pratinjau foto barang ${index + 1}`} /><button type="button" aria-label={`Hapus foto ${index + 1}`} onClick={() => removePhoto(photo.id)}>×</button></div>) : <div className="photo-empty"><strong>Belum ada foto</strong><span>Foto yang terang dan tajam membantu memeriksa label, jahitan, motif, serta kerusakan.</span></div>}</div><div className="photo-picker-actions">
-      <input className="photo-picker-input" {...CAMERA_PICKER_PROPS} ref={cameraPicker} aria-label="Ambil foto barang" tabIndex={-1} onChange={chooseFiles} />
-      <input className="photo-picker-input" {...GALLERY_PICKER_PROPS} ref={galleryPicker} aria-label="Pilih foto barang dari galeri" tabIndex={-1} onChange={chooseFiles} />
-      <button className="photo-picker-action" type="button" onClick={() => cameraPicker.current?.click()} disabled={photoBusy || photos.length >= MAX_PRODUCT_PHOTOS}><span>📷 Ambil Foto</span><small>Buka kamera</small></button>
-      <button className="photo-picker-action gallery" type="button" onClick={() => galleryPicker.current?.click()} disabled={photoBusy || photos.length >= MAX_PRODUCT_PHOTOS}><span>🖼 Pilih dari Galeri</span><small>Pilih beberapa foto</small></button>
-      <div className="photo-count" aria-live="polite">{photos.length} / {MAX_PRODUCT_PHOTOS} foto dipilih{photoBusy && <b> · Memproses foto…</b>}</div>
-      {photoMessage && <p className="photo-picker-error" role="alert">{photoMessage}</p>}
-    </div></div></section>
-    <section className="seller-panel"><PanelTitle eyebrow="02 / IDENTITAS" title="Informasi barang" /><div className="seller-fields two"><Field label="Merek" value={form.brand} onChange={(value) => set('brand', value)} required placeholder="Stussy" /><Field label="Nama barang" value={form.name} onChange={(value) => set('name', value)} required placeholder="Jaket kerja" /><Field label="Kategori" value={form.category} onChange={(value) => set('category', value)} placeholder="Jaket" /><Field label="Subkategori" value={form.subcategory} onChange={(value) => set('subcategory', value)} placeholder="Pakaian kerja" /><Field label="Ukuran" value={form.size_label} onChange={(value) => set('size_label', value)} placeholder="L / 42" /><Field label="Kondisi" value={form.condition} onChange={(value) => set('condition', value)} placeholder="Sangat baik" /><Field label="Catatan kondisi" value={form.condition_notes} onChange={(value) => set('condition_notes', value)} placeholder="Sedikit aus di ujung lengan" /><Field label="Kekurangan / minus" value={form.defects} onChange={(value) => set('defects', value)} placeholder="Tidak ada" /></div></section>
-    <section className="seller-panel"><PanelTitle eyebrow="03 / HARGA" title="Modal & harga" /><div className="seller-fields three"><Field label="Modal pembelian" value={form.purchase_price} onChange={(value) => set('purchase_price', value)} type="number" required placeholder="750000" /><Field label="Harga jual disarankan" value={form.suggested_price} onChange={(value) => set('suggested_price', value)} type="number" placeholder="2250000" /><Field label="Harga minimum" value={form.minimum_price} onChange={(value) => set('minimum_price', value)} type="number" placeholder="1900000" /></div></section>
-    <section className="seller-panel"><PanelTitle eyebrow="04 / ASAL BARANG" title="Asal barang" /><div className="seller-fields two"><Field label="Sumber" value={form.source} onChange={(value) => set('source', value)} placeholder="Hunting / nama penjual" /><Field label="Tautan sumber" value={form.source_url} onChange={(value) => set('source_url', value)} placeholder="https://…" /><Field label="Tanggal pembelian" value={form.purchase_date} onChange={(value) => set('purchase_date', value)} type="date" /><label>Status<select value={form.status} onChange={(event) => set('status', event.target.value)}><option value="draft">Simpan sebagai draf</option><option value="available">Simpan dan tandai tersedia</option></select></label><Field label="Deskripsi" value={form.description} onChange={(value) => set('description', value)} textarea placeholder="Cerita singkat barang untuk calon pembeli…" /></div></section>
-    <div className="seller-form-actions"><button className="seller-primary" disabled={busy || photoBusy}>{busy ? 'MENYIMPAN…' : form.status === 'available' ? 'SIMPAN & TERSEDIA →' : 'SIMPAN SEBAGAI DRAF →'}</button><button type="button" className="seller-secondary" onClick={() => go('/seller/inventory')}>Batal</button></div></form></div>
-}
 
+  return <div className="inventory-form-page">
+    <SellerHeader eyebrow="BARANG / TAMBAH" title="Tambah barang" copy="Catat barang di HAQLOOKS sebelum dianalisis atau disiapkan untuk dijual." action={<button className="seller-secondary compact" type="button" onClick={() => go('/seller/inventory')}>Batal</button>} />
+    {message && <Notice tone="error" role="alert">{message}</Notice>}
+    <form className="seller-form inventory-form" onSubmit={save} aria-busy={busy || photoBusy}>
+      <ProductPhotoPicker photos={photos} photoBusy={photoBusy} photoMessage={photoMessage} activity={uploadMessage} disabled={busy} onFilesSelected={(event) => chooseFiles(event)} onRemovePhoto={removePhoto} />
+      <section className="seller-panel seller-form-section" aria-label="Identitas barang" data-form-section="identity">
+        <PanelTitle eyebrow="02 / IDENTITAS" title="Identitas barang" />
+        <div className="seller-fields two">
+          <Field label="Merek" value={form.brand} onChange={(value) => set('brand', value)} required placeholder="Stussy" />
+          <Field label="Nama barang" value={form.name} onChange={(value) => set('name', value)} required placeholder="Jaket kerja" />
+          <Field label="Kategori" value={form.category} onChange={(value) => set('category', value)} placeholder="Jaket" />
+          <Field label="Subkategori" value={form.subcategory} onChange={(value) => set('subcategory', value)} placeholder="Pakaian kerja" />
+        </div>
+      </section>
+      <section className="seller-panel seller-form-section" aria-label="Ukuran dan kondisi" data-form-section="condition">
+        <PanelTitle eyebrow="03 / VARIAN & KONDISI" title="Ukuran & kondisi" />
+        <div className="seller-fields two">
+          <Field label="Ukuran" value={form.size_label} onChange={(value) => set('size_label', value)} placeholder="L / 42" />
+          <Field label="Kondisi" value={form.condition} onChange={(value) => set('condition', value)} placeholder="Sangat baik" />
+          <Field label="Catatan kondisi" value={form.condition_notes} onChange={(value) => set('condition_notes', value)} placeholder="Sedikit aus di ujung lengan" />
+          <Field label="Kekurangan / minus" value={form.defects} onChange={(value) => set('defects', value)} placeholder="Tidak ada" />
+        </div>
+      </section>
+      <section className="seller-panel seller-form-section" aria-label="Harga dan status" data-form-section="pricing">
+        <PanelTitle eyebrow="04 / HARGA & STATUS" title="Modal, harga & status" />
+        <div className="seller-fields three">
+          <Field label="Modal pembelian" value={form.purchase_price} onChange={(value) => set('purchase_price', value)} type="number" required placeholder="750000" />
+          <Field label="Harga jual disarankan" value={form.suggested_price} onChange={(value) => set('suggested_price', value)} type="number" placeholder="2250000" />
+          <Field label="Harga minimum" value={form.minimum_price} onChange={(value) => set('minimum_price', value)} type="number" placeholder="1900000" />
+          <label>Status barang<select value={form.status} onChange={(event) => set('status', event.target.value)}><option value="draft">Draf</option><option value="available">Tersedia</option></select></label>
+        </div>
+      </section>
+      <section className="seller-panel seller-form-section" aria-label="Asal barang" data-form-section="origin">
+        <PanelTitle eyebrow="05 / ASAL BARANG" title="Asal barang" />
+        <div className="seller-fields two">
+          <Field label="Sumber" value={form.source} onChange={(value) => set('source', value)} placeholder="Hunting / nama penjual" />
+          <Field label="Tautan sumber" value={form.source_url} onChange={(value) => set('source_url', value)} placeholder="https://…" />
+          <Field label="Tanggal pembelian" value={form.purchase_date} onChange={(value) => set('purchase_date', value)} type="date" />
+        </div>
+      </section>
+      <section className="seller-panel seller-form-section" aria-label="Deskripsi barang" data-form-section="copy">
+        <PanelTitle eyebrow="06 / DESKRIPSI PUBLIK" title="Deskripsi barang" />
+        <Field label="Deskripsi" value={form.description} onChange={(value) => set('description', value)} textarea placeholder="Cerita singkat barang untuk calon pembeli…" />
+      </section>
+      <div className="seller-form-actions">
+        <button className="seller-primary" type="submit" disabled={busy || photoBusy}>{busy ? (uploadMessage || 'Menyimpan…') : form.status === 'available' ? 'Simpan & tersedia →' : 'Simpan sebagai draf →'}</button>
+        <button type="button" className="seller-secondary" disabled={busy} onClick={() => go('/seller/inventory')}>Batal</button>
+      </div>
+    </form>
+  </div>
+}
 function Field({ label, value, onChange, type = 'text', placeholder, required = false, textarea = false, name }) { return <label>{label}{textarea ? <textarea name={name} value={value} onChange={onChange ? (event) => onChange(event.target.value) : undefined} placeholder={placeholder} rows="4" required={required} /> : <input name={name} type={type} value={value} onChange={onChange ? (event) => onChange(event.target.value) : undefined} placeholder={placeholder} required={required} />}</label> }
 
 function InventoryDetail({ id }) {
@@ -546,14 +708,26 @@ function InventoryDetail({ id }) {
 }
 
 function ProductSummaryTab({ item, analysis, analysisApplied, onEdit, onReviewAnalysis }) {
+  const [activePhoto, setActivePhoto] = useState(0)
   const result = analysis?.result || {}
   const conditionSummary = analysisBilingualValue(result, 'condition_summary').id
   const aiTitle = analysisBilingualValue(result, 'suggested_title').id
   const aiBrand = analysisBilingualValue(result, 'detected_brand').id
   const aiDefects = analysisBilingualValue(result, 'visible_defects').id
+  const images = Array.isArray(item.image_urls) ? item.image_urls.filter((url) => typeof url === 'string' && url.trim()) : []
+  const selectedPhoto = images[activePhoto] || imageFor(item)
+
+  useEffect(() => { setActivePhoto(0) }, [item.id])
+
   return <div className="product-summary-grid">
     <section className="seller-panel product-item-panel">
-      <div className="product-photo-frame"><img src={imageFor(item)} alt={productDisplayTitle(item)} /></div>
+      <div className="product-photo-gallery">
+        <div className="product-photo-frame"><img src={selectedPhoto} alt={productDisplayTitle(item) + (images.length ? ', foto ' + (activePhoto + 1) : '')} /></div>
+        {images.length > 1 && <div className="product-photo-thumbnails" role="group" aria-label="Pilih foto barang">
+          {images.map((url, index) => <button key={url + '-' + index} type="button" className={activePhoto === index ? 'active' : ''} aria-label={'Tampilkan foto ' + (index + 1) + ' dari ' + images.length} aria-pressed={activePhoto === index} onClick={() => setActivePhoto(index)}><img src={url} alt="" loading="lazy" /></button>)}
+          <span aria-live="polite">{activePhoto + 1} / {images.length}</span>
+        </div>}
+      </div>
       <div className="product-item-content">
         <div className="product-facts-grid"><ProductDetailFact label="Merek" value={item.brand} /><ProductDetailFact label="Kategori" value={item.category} /><ProductDetailFact label="Ukuran" value={item.size_label} /><ProductDetailFact label="Kondisi" value={item.condition} />{item.color && <ProductDetailFact label="Warna" value={item.color} />}{item.material && <ProductDetailFact label="Material" value={item.material} />}</div>
         <div className="product-money-grid"><ProductDetailFact label="Modal" value={moneyIdr(item.purchase_price)} /><ProductDetailFact label="Harga target" value={moneyIdr(item.suggested_price || item.price_idr)} /><ProductDetailFact label="Harga minimum" value={moneyIdr(item.minimum_price)} /></div>
@@ -576,7 +750,6 @@ function ProductSummaryTab({ item, analysis, analysisApplied, onEdit, onReviewAn
     </div>
   </div>
 }
-
 function ProductDetailFact({ label, value }) { return <div className="product-detail-fact"><span>{label}</span><strong>{value || '—'}</strong></div> }
 
 function ProductNote({ label, value }) {
@@ -661,14 +834,118 @@ function AnalysisField({ result, fieldKey, label, labelEn, selectable = false, c
 }
 
 function EditInventory({ id }) {
-  const [form, setForm] = useState(null); const [message, setMessage] = useState(''); const [busy, setBusy] = useState(false)
-  useEffect(() => { async function load() { const { data, error } = await supabase.from('products').select('*').eq('id', id).single(); if (error) setMessage(errorText(error)); else setForm(data) }; load() }, [id])
-  function set(key, value) { setForm((current) => ({ ...current, [key]: value })) }
-  async function save(event) { event.preventDefault(); setBusy(true); const payload = { brand: form.brand, name: form.name, category: form.category || null, subcategory: form.subcategory || null, size_label: form.size_label || null, condition: form.condition || 'Good', condition_notes: form.condition_notes || null, defects: form.defects || null, purchase_price: Number(form.purchase_price || 0), suggested_price: Number(form.suggested_price || 0), minimum_price: Number(form.minimum_price || 0), price_idr: Number(form.suggested_price || 0), source: form.source || null, source_url: form.source_url ? safeHttpUrl(form.source_url) : null, purchase_date: form.purchase_date || null, description: form.description || null, status: form.status, is_published: Boolean(form.is_published), updated_at: new Date().toISOString() }; if (form.source_url && !payload.source_url) { setMessage('Tautan sumber harus diawali http:// atau https://.'); setBusy(false); return }; const { error } = await supabase.from('products').update(payload).eq('id', id); if (error) setMessage(errorText(error)); else go(`/seller/inventory/${id}`); setBusy(false) }
-  if (!form) return message ? <Notice tone="error">{message}</Notice> : <SellerLoading text="Memuat barang…" />
-  return <div><a className="seller-back-link" href={`/seller/inventory/${id}`} onClick={(event) => { event.preventDefault(); go(`/seller/inventory/${id}`) }}>← Kembali ke barang</a><SellerHeader eyebrow={`${form.sku || 'SKU belum tersedia'} / EDIT`} title="Edit barang" copy="Perbarui data barang. SKU dan foto yang sudah ada akan tetap dipertahankan." /><form className="seller-panel seller-form" onSubmit={save}><div className="seller-fields two"><Field label="Merek" value={form.brand || ''} onChange={(value) => set('brand', value)} required /><Field label="Nama barang" value={form.name || ''} onChange={(value) => set('name', value)} required /><Field label="Kategori" value={form.category || ''} onChange={(value) => set('category', value)} /><Field label="Subkategori" value={form.subcategory || ''} onChange={(value) => set('subcategory', value)} /><Field label="Ukuran" value={form.size_label || ''} onChange={(value) => set('size_label', value)} /><Field label="Kondisi" value={form.condition || ''} onChange={(value) => set('condition', value)} /><Field label="Catatan kondisi" value={form.condition_notes || ''} onChange={(value) => set('condition_notes', value)} /><Field label="Kekurangan / minus" value={form.defects || ''} onChange={(value) => set('defects', value)} /><Field label="Modal pembelian" value={form.purchase_price || ''} onChange={(value) => set('purchase_price', value)} type="number" /><Field label="Harga jual disarankan" value={form.suggested_price || form.price_idr || ''} onChange={(value) => set('suggested_price', value)} type="number" /><Field label="Harga minimum" value={form.minimum_price || ''} onChange={(value) => set('minimum_price', value)} type="number" /><Field label="Sumber" value={form.source || ''} onChange={(value) => set('source', value)} /><Field label="Tautan sumber" value={form.source_url || ''} onChange={(value) => set('source_url', value)} /><Field label="Tanggal pembelian" value={form.purchase_date || ''} onChange={(value) => set('purchase_date', value)} type="date" /><label>Status<select value={form.status} onChange={(event) => set('status', event.target.value)}>{INVENTORY_STATUSES.map((status) => <option key={status} value={status}>{inventoryStatusLabel(status)}</option>)}</select></label><Field label="Deskripsi" value={form.description || ''} onChange={(value) => set('description', value)} textarea /></div><label className="check-field"><input type="checkbox" checked={Boolean(form.is_published)} onChange={(event) => set('is_published', event.target.checked)} /> Tampilkan di etalase publik</label>{message && <Notice tone="error">{message}</Notice>}<div className="seller-form-actions"><button className="seller-primary" disabled={busy}>{busy ? 'Menyimpan…' : 'Simpan perubahan →'}</button><button type="button" className="seller-secondary" onClick={() => go(`/seller/inventory/${id}`)}>Batal</button></div></form></div>
-}
+  const [form, setForm] = useState(null)
+  const [message, setMessage] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [uploadMessage, setUploadMessage] = useState('')
+  const [removedPhotos, setRemovedPhotos] = useState([])
+  const { photos, photoBusy, photoMessage, chooseFiles, removePhoto, resetPhotos } = useProductPhotoDraft()
 
+  useEffect(() => {
+    let active = true
+    setForm(null)
+    setMessage('')
+    setLoading(true)
+    setRemovedPhotos([])
+    resetPhotos()
+    async function load() {
+      if (!supabase) {
+        if (active) { setMessage('Koneksi database belum dikonfigurasi.'); setLoading(false) }
+        return
+      }
+      try {
+        const { data, error } = await supabase.from('products').select('*').eq('id', id).single()
+        if (!active) return
+        if (error) setMessage(errorText(error, 'Barang belum dapat dimuat.'))
+        else setForm(data)
+      } catch (error) {
+        if (active) setMessage(errorText(error, 'Barang belum dapat dimuat.'))
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+    load()
+    return () => { active = false }
+  }, [id])
+
+  function set(key, value) { setForm((current) => ({ ...current, [key]: value })) }
+
+  async function uploadNewPhotos() {
+    const urls = []
+    for (let index = 0; index < photos.length; index += 1) {
+      setUploadMessage('Mengunggah foto ' + (index + 1) + ' dari ' + photos.length + '…')
+      const { file } = photos[index]
+      const extension = productPhotoExtension(file)
+      const path = 'inventory/' + crypto.randomUUID() + '.' + extension
+      const contentType = file.type || (extension === 'png' ? 'image/png' : extension === 'webp' ? 'image/webp' : 'image/jpeg')
+      const { error } = await supabase.storage.from('product-images').upload(path, file, { upsert: false, contentType })
+      if (error) throw error
+      urls.push(supabase.storage.from('product-images').getPublicUrl(path).data.publicUrl)
+    }
+    return urls
+  }
+
+  async function save(event) {
+    event.preventDefault()
+    if (busy || photoBusy) return
+    setMessage('')
+    setUploadMessage('')
+    if (!supabase) { setMessage('Koneksi database belum dikonfigurasi.'); return }
+    if (form.source_url && !safeHttpUrl(form.source_url)) { setMessage('Tautan sumber harus diawali http:// atau https://. Data lama tetap dipertahankan.'); return }
+
+    setBusy(true)
+    try {
+      const uploadedUrls = await uploadNewPhotos()
+      const imageUrls = [...(form.image_urls || []).filter((url) => !removedPhotos.includes(url)), ...uploadedUrls]
+      const payload = { brand: form.brand, name: form.name, category: form.category || null, subcategory: form.subcategory || null, size_label: form.size_label || null, condition: form.condition || 'Good', condition_notes: form.condition_notes || null, defects: form.defects || null, purchase_price: Number(form.purchase_price || 0), suggested_price: Number(form.suggested_price || 0), minimum_price: Number(form.minimum_price || 0), price_idr: Number(form.suggested_price || 0), source: form.source || null, source_url: form.source_url ? safeHttpUrl(form.source_url) : null, purchase_date: form.purchase_date || null, description: form.description || null, status: form.status, is_published: Boolean(form.is_published), image_urls: imageUrls, updated_at: new Date().toISOString() }
+      const { error } = await supabase.from('products').update(payload).eq('id', id)
+      if (error) throw error
+      go('/seller/inventory/' + id)
+    } catch (error) {
+      setMessage(errorText(error, 'Perubahan belum dapat disimpan. Foto lama dan data barang tetap dipertahankan.'))
+    } finally {
+      setBusy(false)
+      setUploadMessage('')
+    }
+  }
+
+  if (loading) return <SellerLoading text="Memuat barang…" />
+  if (!form) return <div className="seller-empty" role="alert"><strong>{message || 'Barang tidak ditemukan.'}</strong><button className="seller-secondary" type="button" onClick={() => go('/seller/inventory')}>← Kembali ke Barang</button></div>
+  const existingUrls = (Array.isArray(form.image_urls) ? form.image_urls : []).filter((url) => !removedPhotos.includes(url))
+
+  return <div className="inventory-form-page">
+    <a className="seller-back-link" href={'/seller/inventory/' + id} onClick={(event) => { event.preventDefault(); go('/seller/inventory/' + id) }}>← Kembali ke barang</a>
+    <SellerHeader eyebrow={(form.sku || 'SKU belum tersedia') + ' / EDIT'} title="Edit barang" copy="Perbarui data barang. Foto lama tetap dipertahankan kecuali Anda mengeluarkannya secara eksplisit." />
+    {message && <Notice tone="error" role="alert">{message}</Notice>}
+    <form className="seller-panel seller-form inventory-form" onSubmit={save} aria-busy={busy || photoBusy}>
+      <ProductPhotoPicker existingUrls={existingUrls} photos={photos} photoBusy={photoBusy} photoMessage={photoMessage} activity={uploadMessage} disabled={busy} onFilesSelected={(event) => chooseFiles(event, existingUrls.length)} onRemovePhoto={removePhoto} onRemoveExisting={(url) => setRemovedPhotos((current) => current.includes(url) ? current : [...current, url])} />
+      {removedPhotos.length > 0 && <div className="photo-removal-notice"><span>Foto dikeluarkan dari daftar barang; file asli tetap disimpan.</span><button type="button" className="seller-secondary compact" onClick={() => setRemovedPhotos([])} disabled={busy}>Batalkan</button></div>}
+      <section className="seller-panel seller-form-section" aria-label="Identitas barang" data-form-section="identity">
+        <PanelTitle eyebrow="02 / IDENTITAS" title="Identitas barang" />
+        <div className="seller-fields two"><Field label="Merek" value={form.brand || ''} onChange={(value) => set('brand', value)} required /><Field label="Nama barang" value={form.name || ''} onChange={(value) => set('name', value)} required /><Field label="Kategori" value={form.category || ''} onChange={(value) => set('category', value)} /><Field label="Subkategori" value={form.subcategory || ''} onChange={(value) => set('subcategory', value)} /></div>
+      </section>
+      <section className="seller-panel seller-form-section" aria-label="Ukuran dan kondisi" data-form-section="condition">
+        <PanelTitle eyebrow="03 / VARIAN & KONDISI" title="Ukuran & kondisi" />
+        <div className="seller-fields two"><Field label="Ukuran" value={form.size_label || ''} onChange={(value) => set('size_label', value)} /><Field label="Kondisi" value={form.condition || ''} onChange={(value) => set('condition', value)} /><Field label="Catatan kondisi" value={form.condition_notes || ''} onChange={(value) => set('condition_notes', value)} /><Field label="Kekurangan / minus" value={form.defects || ''} onChange={(value) => set('defects', value)} /></div>
+      </section>
+      <section className="seller-panel seller-form-section" aria-label="Harga dan status" data-form-section="pricing">
+        <PanelTitle eyebrow="04 / HARGA & STATUS" title="Modal, harga & status" />
+        <div className="seller-fields three"><Field label="Modal pembelian" value={form.purchase_price ?? ''} onChange={(value) => set('purchase_price', value)} type="number" /><Field label="Harga jual disarankan" value={form.suggested_price ?? form.price_idr ?? ''} onChange={(value) => set('suggested_price', value)} type="number" /><Field label="Harga minimum" value={form.minimum_price ?? ''} onChange={(value) => set('minimum_price', value)} type="number" /><label>Status barang<select value={form.status} onChange={(event) => set('status', event.target.value)}>{INVENTORY_STATUSES.map((status) => <option key={status} value={status}>{inventoryStatusLabel(status)}</option>)}</select></label></div>
+      </section>
+      <section className="seller-panel seller-form-section" aria-label="Asal barang" data-form-section="origin">
+        <PanelTitle eyebrow="05 / ASAL BARANG" title="Asal barang" />
+        <div className="seller-fields two"><Field label="Sumber" value={form.source || ''} onChange={(value) => set('source', value)} /><Field label="Tautan sumber" value={form.source_url || ''} onChange={(value) => set('source_url', value)} placeholder="https://…" /><Field label="Tanggal pembelian" value={form.purchase_date || ''} onChange={(value) => set('purchase_date', value)} type="date" /></div>
+      </section>
+      <section className="seller-panel seller-form-section" aria-label="Deskripsi barang" data-form-section="copy">
+        <PanelTitle eyebrow="06 / DESKRIPSI PUBLIK" title="Deskripsi barang" />
+        <Field label="Deskripsi" value={form.description || ''} onChange={(value) => set('description', value)} textarea />
+        <label className="check-field"><input type="checkbox" checked={Boolean(form.is_published)} onChange={(event) => set('is_published', event.target.checked)} /> Tampilkan di etalase publik</label>
+      </section>
+      <div className="seller-form-actions"><button className="seller-primary" type="submit" disabled={busy || photoBusy}>{busy ? (uploadMessage || 'Menyimpan…') : 'Simpan perubahan →'}</button><button type="button" className="seller-secondary" disabled={busy} onClick={() => go('/seller/inventory/' + id)}>Batal</button></div>
+    </form>
+  </div>
+}
 function ListingRow({ listing, label, onEdit }) { return <div className="listing-row"><div><strong>{label}</strong><span>{listing.listing_url ? 'URL tersimpan' : 'URL belum dicatat'}</span></div><div><b className={`listing-status ${listing.listing_status.toLowerCase()}`}>{marketplaceStatusLabel(listing.listing_status)}</b><small>{listing.listed_price ? moneyIdr(listing.listed_price) : '—'}</small></div><button type="button" onClick={onEdit}>Ubah</button></div> }
 
 function SourcingPage({ embedded = false, onOpenProduct = () => {}, onOpenResearch = () => {} }) {
@@ -923,4 +1200,3 @@ function SettingsPage() {
   async function save(event) { event.preventDefault(); setBusy(true); const { error } = await supabase.from('app_settings').upsert({ key: 'ai_monthly_budget', value: { amount: Number(budget || 0), currency: 'IDR' }, updated_at: new Date().toISOString() }); setMessage(error ? errorText(error) : 'Monthly AI budget updated.'); setBusy(false) }
   return <div><SellerHeader eyebrow="ADMIN / CONFIGURATION" title="AI & Anggaran" copy="Small operational settings that affect seller workflows." /><form className="seller-panel settings-form" onSubmit={save}><PanelTitle eyebrow="AI GUARDRAIL" title="Monthly budget" /><p className="seller-muted">The server-side AI budget guard blocks paid calls when usage reaches this amount. Default: Rp100.000.</p><Field label="Monthly AI budget (IDR)" value={budget} onChange={setBudget} type="number" required /><div className="seller-form-actions"><button className="seller-primary" disabled={busy}>{busy ? 'Saving…' : 'Save settings'}</button></div>{message && <Notice tone={message.includes('updated') ? 'success' : 'error'}>{message}</Notice>}</form><section className="seller-panel"><PanelTitle eyebrow="FUTURE INTEGRATIONS" title="Telegram contract" /><p className="seller-muted">The future endpoint is documented in <code>docs/SELLER_PANEL.md</code>. It will require authenticated server-to-server access and will create master inventory records before any downstream action.</p></section></div>
 }
-
