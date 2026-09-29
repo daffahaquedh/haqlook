@@ -1208,12 +1208,75 @@ function SalesPage({ onOpenProduct }) {
 }
 
 function AIUsagePage() {
-  const [summary, setSummary] = useState(null); const [logs, setLogs] = useState([]); const [message, setMessage] = useState('')
-  useEffect(() => { async function load() { if (!supabase) return; const [{ data: usage, error }, { data: records }] = await Promise.all([supabase.rpc('seller_ai_usage_summary'), supabase.from('ai_usage').select('*').order('created_at', { ascending: false }).limit(30)]); if (error) setMessage(errorText(error)); else setSummary(usage); setLogs(records || []) }; load() }, [])
-  const tone = budgetTone(summary?.used || 0, summary?.budget || 0)
-  return <div><SellerHeader eyebrow="AI FOUNDATION" title="Penggunaan AI" copy="Usage is tracked server-side. Inventory and seller operations continue when the AI budget is empty." />{message && <Notice tone="warning">{message}</Notice>}<section className="ai-budget-card"><div><span className="seller-kicker">MONTHLY BUDGET</span><strong>{moneyIdr(summary?.used || 0)} <small>/ {moneyIdr(summary?.budget || 100000)}</small></strong><p>{budgetLabel(summary?.used || 0, summary?.budget || 100000)}</p></div><div className={`big-budget-percent ${tone}`}>{Math.round(summary?.percentage || 0)}%</div></section>{!AI_ENABLED && <Notice tone="info">AI belum dikonfigurasi. Set VITE_AI_ENABLED=true only after deploying the server-side Supabase function with OPENAI_API_KEY.</Notice>}<section className="seller-panel"><PanelTitle eyebrow="RECENT EVENTS" title="Usage log" />{logs.length ? <div className="usage-list">{logs.map((log) => <div className="usage-row" key={log.id}><div><strong>{titleCaseStatus(log.feature)}</strong><span>{log.model || 'model unknown'} · {dateLabel(log.created_at)}</span></div><div><b>{moneyIdr(log.estimated_cost)}</b><small>{Number(log.input_tokens || 0) + Number(log.output_tokens || 0)} tokens</small></div></div>)}</div> : <div className="seller-empty"><strong>NO AI USAGE</strong><p>There are no server-side AI calls recorded this month.</p></div>}</section></div>
-}
+  const [summary, setSummary] = useState(null)
+  const [logs, setLogs] = useState([])
+  const [message, setMessage] = useState('')
 
+  useEffect(() => {
+    async function load() {
+      if (!supabase) return
+      const [{ data: usage, error }, { data: records }] = await Promise.all([
+        supabase.rpc('seller_ai_usage_summary'),
+        supabase.from('ai_usage').select('*').order('created_at', { ascending: false }).limit(30),
+      ])
+      if (error) setMessage(errorText(error))
+      else setSummary(usage)
+      setLogs(records || [])
+    }
+    void load()
+  }, [])
+
+  const used = summary?.used || 0
+  const budget = summary?.budget || 100000
+  const tone = budgetTone(used, budget)
+  const budgetStatus = budgetLabel(used, budget)
+  const budgetStatusLabels = {
+    Healthy: 'Aman',
+    Info: 'Perhatian',
+    Warning: 'Waspada',
+    Critical: 'Kritis',
+    'AI calls blocked': 'Diblokir',
+  }
+  const featureLabels = {
+    ITEM_ANALYSIS: 'Analisis barang',
+    LISTING_GENERATION: 'Pembuatan listing',
+    HUNTER_DESTINATION_BRIEF: 'Riset destinasi Hunter',
+    HUNTER_CHAT: 'Percakapan Hunter',
+    HUNTER_REFRESH: 'Pembaruan riset Hunter',
+    HUNTER_ITEM_CHECK: 'Cek barang Hunter',
+  }
+
+  return <div>
+    <SellerHeader eyebrow="PENGGUNAAN AI" title="Penggunaan AI" copy="Pemakaian dicatat di server. Operasional barang tetap berjalan meskipun anggaran AI habis." />
+    {message && <Notice tone="warning">{message}</Notice>}
+    <section className="ai-budget-card" aria-label="Ringkasan anggaran AI">
+      <div>
+        <span className="seller-kicker">ANGGARAN BULANAN</span>
+        <strong>{moneyIdr(used)} <small>/ {moneyIdr(budget)}</small></strong>
+        <p>{budgetStatusLabels[budgetStatus] || budgetStatus}</p>
+      </div>
+      <div className={'big-budget-percent ' + tone}>{Math.round(summary?.percentage || 0)}%</div>
+    </section>
+    {!AI_ENABLED && <Notice tone="info">AI belum diaktifkan untuk environment ini.</Notice>}
+    <section className="seller-panel">
+      <PanelTitle eyebrow="AKTIVITAS TERBARU" title="Riwayat penggunaan" />
+      {logs.length
+        ? <div className="usage-list">{logs.map((log) => (
+          <div className="usage-row" key={log.id}>
+            <div>
+              <strong>{featureLabels[log.feature] || titleCaseStatus(log.feature)}</strong>
+              <span>{log.model || 'Model tidak diketahui'} · {dateLabel(log.created_at)}</span>
+            </div>
+            <div>
+              <b>{moneyIdr(log.estimated_cost)}</b>
+              <small>{Number(log.input_tokens || 0) + Number(log.output_tokens || 0)} token</small>
+            </div>
+          </div>
+        ))}</div>
+        : <div className="seller-empty"><strong>Belum ada penggunaan AI</strong><p>Aktivitas AI yang tercatat bulan ini akan tampil di sini.</p></div>}
+    </section>
+  </div>
+}
 function StoreContactPage() {
   const empty = { whatsapp_number: '', instagram_url: '' }
   const [form, setForm] = useState(empty)
@@ -1351,8 +1414,46 @@ function StoreContactPage() {
 }
 
 function SettingsPage() {
-  const [budget, setBudget] = useState('100000'); const [message, setMessage] = useState(''); const [busy, setBusy] = useState(false)
-  useEffect(() => { async function load() { if (!supabase) return; const { data } = await supabase.from('app_settings').select('value').eq('key', 'ai_monthly_budget').maybeSingle(); if (data?.value?.amount) setBudget(String(data.value.amount)) }; load() }, [])
-  async function save(event) { event.preventDefault(); setBusy(true); const { error } = await supabase.from('app_settings').upsert({ key: 'ai_monthly_budget', value: { amount: Number(budget || 0), currency: 'IDR' }, updated_at: new Date().toISOString() }); setMessage(error ? errorText(error) : 'Monthly AI budget updated.'); setBusy(false) }
-  return <div><SellerHeader eyebrow="ADMIN / CONFIGURATION" title="AI & Anggaran" copy="Small operational settings that affect seller workflows." /><form className="seller-panel settings-form" onSubmit={save}><PanelTitle eyebrow="AI GUARDRAIL" title="Monthly budget" /><p className="seller-muted">The server-side AI budget guard blocks paid calls when usage reaches this amount. Default: Rp100.000.</p><Field label="Monthly AI budget (IDR)" value={budget} onChange={setBudget} type="number" required /><div className="seller-form-actions"><button className="seller-primary" disabled={busy}>{busy ? 'Saving…' : 'Save settings'}</button></div>{message && <Notice tone={message.includes('updated') ? 'success' : 'error'}>{message}</Notice>}</form><section className="seller-panel"><PanelTitle eyebrow="FUTURE INTEGRATIONS" title="Telegram contract" /><p className="seller-muted">The future endpoint is documented in <code>docs/SELLER_PANEL.md</code>. It will require authenticated server-to-server access and will create master inventory records before any downstream action.</p></section></div>
+  const [budget, setBudget] = useState('100000')
+  const [message, setMessage] = useState('')
+  const [busy, setBusy] = useState(false)
+  const savedMessage = 'Anggaran AI bulanan berhasil diperbarui.'
+
+  useEffect(() => {
+    async function load() {
+      if (!supabase) return
+      const { data } = await supabase.from('app_settings').select('value').eq('key', 'ai_monthly_budget').maybeSingle()
+      if (data?.value?.amount) setBudget(String(data.value.amount))
+    }
+    void load()
+  }, [])
+
+  async function save(event) {
+    event.preventDefault()
+    setBusy(true)
+    const { error } = await supabase.from('app_settings').upsert({
+      key: 'ai_monthly_budget',
+      value: { amount: Number(budget || 0), currency: 'IDR' },
+      updated_at: new Date().toISOString(),
+    })
+    setMessage(error ? errorText(error) : savedMessage)
+    setBusy(false)
+  }
+
+  return <div>
+    <SellerHeader eyebrow="PENGATURAN ADMIN" title="AI & Anggaran" copy="Atur batas anggaran agar penggunaan AI tetap terkendali." />
+    <form className="seller-panel settings-form" onSubmit={save}>
+      <PanelTitle eyebrow="BATAS PEMAKAIAN AI" title="Anggaran bulanan" />
+      <p className="seller-muted">Batas ini menghentikan panggilan AI berbayar saat pemakaian mencapai anggaran. Nilai awal: Rp100.000.</p>
+      <Field label="Anggaran AI bulanan (IDR)" value={budget} onChange={setBudget} type="number" required />
+      <div className="seller-form-actions">
+        <button className="seller-primary" disabled={busy}>{busy ? 'Menyimpan…' : 'Simpan pengaturan'}</button>
+      </div>
+      {message && <Notice tone={message === savedMessage ? 'success' : 'error'}>{message}</Notice>}
+    </form>
+    <section className="seller-panel">
+      <PanelTitle eyebrow="INTEGRASI MENDATANG" title="Telegram (belum aktif)" />
+      <p className="seller-muted">Fondasi endpoint telah didokumentasikan di <code>docs/SELLER_PANEL.md</code>. Integrasi belum tersedia dan belum dapat digunakan.</p>
+    </section>
+  </div>
 }
