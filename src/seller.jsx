@@ -122,6 +122,7 @@ export default function SellerApp({ path }) {
 
 function SellerWorkspace({ path, profile, onLogout }) {
   const workspacePath = workspacePathForLegacyAdmin(path)
+  const isHaqAiChat = workspacePath === '/seller/ai-hunter'
   const [section, id, subSection] = workspacePath.replace(/^\/seller\/?/, '').split('/')
   useEffect(() => {
     if (path === '/admin' && profile.role !== 'ADMIN') go('/seller')
@@ -138,7 +139,7 @@ function SellerWorkspace({ path, profile, onLogout }) {
   else if (section === 'ai-hunter' || section === 'sourcing') page = <HuntingWorkspace path={workspacePath} />
   else if (section === 'listings' || section === 'sales') page = <JualanWorkspace path={workspacePath} />
   if (path === '/admin' && profile.role !== 'ADMIN') page = <AccessDenied />
-  return <main className="seller-app"><SellerSidebar path={workspacePath} profile={profile} onLogout={onLogout} /><section className="seller-content">{page}</section><SellerMobileNav path={workspacePath} profile={profile} onLogout={onLogout} /></main>
+  return <main className={isHaqAiChat ? 'seller-app haq-ai-chat-shell' : 'seller-app'}><SellerSidebar path={workspacePath} profile={profile} onLogout={onLogout} /><section className="seller-content">{page}</section><SellerMobileNav path={workspacePath} profile={profile} onLogout={onLogout} /></main>
 }
 
 function HuntingWorkspace({ path }) {
