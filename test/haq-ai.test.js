@@ -5,10 +5,11 @@ import { boundHaqAiContext, isHaqAiGreeting, jakartaMonthRange, routeHaqAiContex
 import { createHaqAiChatRequest } from '../supabase/functions/seller-ai/hunter-analysis.ts'
 import { huntingPathForTab, huntingTabForPath, SELLER_MOBILE_PRIMARY_LINKS, SELLER_WORKSPACE_GROUPS } from '../src/seller-utils.js'
 
-const [sellerSource, chatSource, chatStyles, handlerSource, analysisSource] = await Promise.all([
+const [sellerSource, chatSource, chatStyles, shellStyles, handlerSource, analysisSource] = await Promise.all([
   readFile(new URL('../src/seller.jsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/haq-ai.jsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/haq-ai.css', import.meta.url), 'utf8'),
+  readFile(new URL('../src/seller.css', import.meta.url), 'utf8'),
   readFile(new URL('../supabase/functions/seller-ai/hunter-handler.ts', import.meta.url), 'utf8'),
   readFile(new URL('../supabase/functions/seller-ai/hunter-analysis.ts', import.meta.url), 'utf8'),
 ])
@@ -113,6 +114,23 @@ test('chat retains safe touch targets, mobile safe-area spacing, Enter and multi
   assert.match(chatStyles, /min-height:48px/)
   assert.match(chatStyles, /overflow-wrap:anywhere/)
   assert.match(chatStyles, /grid-template-columns:minmax\(0,1fr\) 78px/)
+})
+
+test('mobile HAQ AI keeps its composer visible above the bottom navigation', () => {
+  assert.match(sellerSource, /const isHaqAiChat = workspacePath === '\/seller\/ai-hunter'/)
+  assert.match(sellerSource, /className=\{isHaqAiChat \? 'seller-app haq-ai-chat-shell' : 'seller-app'\}/)
+  assert.match(chatSource, /<div className="haq-ai-transcript"[\s\S]*?\{!messages\.length && <div className="haq-ai-empty">/)
+  assert.match(chatSource, /if \(!messages\.length && !loading\) return/)
+  assert.match(shellStyles, /\.seller-app\.haq-ai-chat-shell\{[^}]*height:100dvh;[^}]*grid-template-rows:auto minmax\(0,1fr\) auto;[^}]*overflow:hidden/)
+  assert.match(shellStyles, /\.seller-app\.haq-ai-chat-shell>\.seller-mobile-nav\{[^}]*position:relative;[^}]*transform:none/)
+  assert.match(shellStyles, /\.seller-app\.haq-ai-chat-shell \.haq-ai-chat-panel:not\(\[hidden\]\)\{[^}]*min-height:0/)
+  assert.match(chatStyles, /\.haq-ai-chat-shell \.haq-ai-transcript\{[^}]*flex:1 1 0;min-height:0;max-height:none;overflow-x:hidden;overflow-y:auto/)
+  assert.match(chatStyles, /\.haq-ai-chat-shell \.haq-ai-composer\{flex:0 0 auto;margin:0\}/)
+  assert.match(chatStyles, /\.haq-ai-chat-shell \.haq-ai-composer textarea\{max-height:84px;resize:none\}/)
+  assert.match(shellStyles, /padding:7px 8px calc\(7px \+ env\(safe-area-inset-bottom\)\)/)
+  assert.match(sellerSource, /href="\/seller\/ai-hunter\/research"/)
+  assert.match(sellerSource, /href="\/seller\/sourcing"/)
+  assert.match(shellStyles, /@media\(max-width:700px\)[\s\S]*?\.seller-app\.haq-ai-chat-shell/)
 })
 
 test('AI usage remains on the existing server-side accounting lifecycle', () => {

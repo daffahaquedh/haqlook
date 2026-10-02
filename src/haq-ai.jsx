@@ -39,6 +39,7 @@ export default function HaqAIChatPage({ onStartResearch = () => {} }) {
   const inFlight = useRef(false)
 
   useEffect(() => {
+    if (!messages.length && !loading) return
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
   }, [messages.length, loading])
 
@@ -112,14 +113,14 @@ export default function HaqAIChatPage({ onStartResearch = () => {} }) {
       <p>HAQ AI difokuskan untuk kebutuhan toko HAQLOOKS.</p>
     </div>
 
-    {!messages.length && <div className="haq-ai-empty">
-      <div className="haq-ai-welcome"><span className="haq-ai-mark" aria-hidden="true">H</span><div><strong>Ada yang bisa kubantu?</strong><p>Tanya soal barang, Temuan, listing, penjualan, atau operasional toko.</p></div></div>
-      <div className="haq-ai-starters" aria-label="Contoh pertanyaan">
-        {STARTERS.map((starter) => <button type="button" key={starter} onClick={() => useStarter(starter)}>{starter}<span aria-hidden="true">↗</span></button>)}
-      </div>
-    </div>}
-
     <div className="haq-ai-transcript" aria-live="polite" aria-relevant="additions text" aria-busy={loading}>
+      {!messages.length && <div className="haq-ai-empty">
+        <div className="haq-ai-welcome"><span className="haq-ai-mark" aria-hidden="true">H</span><div><strong>Ada yang bisa kubantu?</strong><p>Tanya soal barang, Temuan, listing, penjualan, atau operasional toko.</p></div></div>
+        <div className="haq-ai-starters" aria-label="Contoh pertanyaan">
+          {STARTERS.map((starter) => <button type="button" key={starter} onClick={() => useStarter(starter)}>{starter}<span aria-hidden="true">↗</span></button>)}
+        </div>
+      </div>}
+
       {messages.map((message) => <article key={message.id} className={`haq-ai-message ${message.role}`}>
         <small>{message.role === 'assistant' ? 'HAQ AI' : 'KAMU'}</small>
         <p>{message.content}</p>

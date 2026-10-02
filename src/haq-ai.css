@@ -53,3 +53,20 @@
   .haq-ai-research-prompt button{width:100%;min-height:48px}
 }
 @media(prefers-reduced-motion:reduce){.haq-ai-spinner{animation:none;border-color:#8dc9a6;border-right-color:transparent}}
+
+
+/* Keep the message list scrollable while the mobile composer stays in view. */
+@media(max-width:700px){
+  .haq-ai-chat-shell .haq-ai-chat{height:100%;min-height:0;flex:1 1 auto;gap:8px;overflow:hidden}
+  .haq-ai-chat-shell .haq-ai-intro{display:none}
+  .haq-ai-chat-shell .haq-ai-transcript{flex:1 1 0;min-height:0;max-height:none;overflow-x:hidden;overflow-y:auto}
+  .haq-ai-chat-shell .haq-ai-empty{flex:0 0 auto;gap:10px;padding:10px}
+  .haq-ai-chat-shell .haq-ai-welcome{gap:9px}
+  .haq-ai-chat-shell .haq-ai-mark{width:36px;height:36px;flex-basis:36px}
+  .haq-ai-chat-shell .haq-ai-welcome p{margin-top:3px;line-height:1.35}
+  .haq-ai-chat-shell .haq-ai-starters{gap:6px}
+  .haq-ai-chat-shell .haq-ai-starters button{min-height:44px;padding:7px;font-size:.65rem}
+  .haq-ai-chat-shell .haq-ai-disabled{flex:0 0 auto;margin:0;padding:8px 10px;font-size:.65rem}
+  .haq-ai-chat-shell .haq-ai-composer{flex:0 0 auto;margin:0}
+  .haq-ai-chat-shell .haq-ai-composer textarea{max-height:84px;resize:none}
+}

@@ -639,3 +639,22 @@
   .jualan-sale-identity{grid-column:2;grid-row:1}
   .jualan-sale-main .listing-action-link{grid-column:2;grid-row:2;justify-self:start;padding-inline:0}
 }
+
+
+/* HAQ AI only: fit the mobile conversation between the staff header and bottom navigation. */
+@media(max-width:700px){
+  .seller-app.haq-ai-chat-shell{height:100vh;height:100dvh;min-height:0;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto;overflow:hidden}
+  .seller-app.haq-ai-chat-shell>.seller-sidebar{position:relative;top:auto;min-width:0}
+  .seller-app.haq-ai-chat-shell>.seller-sidebar .seller-brand{padding-bottom:8px}
+  .seller-app.haq-ai-chat-shell>.seller-content{display:flex;min-width:0;min-height:0;overflow:hidden;padding:10px 12px 8px}
+  .seller-app.haq-ai-chat-shell .hunting-workspace{display:flex;width:100%;height:100%;min-height:0;flex-direction:column;overflow:hidden}
+  .seller-app.haq-ai-chat-shell .hunting-workspace-heading{flex:0 0 auto;align-items:center;margin:0 0 8px}
+  .seller-app.haq-ai-chat-shell .hunting-workspace-heading h1{margin:0;font-size:1.7rem;line-height:1}
+  .seller-app.haq-ai-chat-shell .hunting-workspace-heading p{display:none}
+  .seller-app.haq-ai-chat-shell .hunting-workspace-tabs{position:relative;top:auto;flex:0 0 auto;gap:4px;margin:0 0 8px;padding:3px}
+  .seller-app.haq-ai-chat-shell .hunting-workspace-tabs a{min-height:44px;padding:6px}
+  .seller-app.haq-ai-chat-shell .hunting-workspace-tabs a span{font-size:.72rem}
+  .seller-app.haq-ai-chat-shell .haq-ai-chat-panel:not([hidden]){display:flex;flex:1 1 auto;min-width:0;min-height:0;overflow:hidden}
+  .seller-app.haq-ai-chat-shell .hunting-workspace-panel[hidden]{display:none}
+  .seller-app.haq-ai-chat-shell>.seller-mobile-nav{position:relative;inset:auto;min-width:0;width:100%;transform:none}
+}
