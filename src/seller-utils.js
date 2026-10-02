@@ -98,7 +98,7 @@ export const ITEM_ANALYSIS_SUGGESTIONS = [
 ]
 
 export const SELLER_WORKSPACE_GROUPS = [
-  { label: 'OPERASIONAL', links: [['/seller', 'Beranda', '⌂'], ['/seller/inventory', 'Barang', '▣'], ['/seller/ai-hunter', 'Hunting', '✦'], ['/seller/listings', 'Jualan', '↗']] },
+  { label: 'OPERASIONAL', links: [['/seller', 'Beranda', '⌂'], ['/seller/inventory', 'Barang', '▣'], ['/seller/ai-hunter', 'HAQ AI', '✦'], ['/seller/listings', 'Jualan', '↗']] },
   { label: 'LAINNYA', links: [['/seller/store-contact', 'Kontak Toko', '◇']] },
 ]
 
@@ -124,7 +124,7 @@ export const ADMIN_SETTINGS_TABS = [
 export const SELLER_MOBILE_PRIMARY_LINKS = [
   ['/seller', 'Beranda', '⌂'],
   ['/seller/inventory', 'Barang', '▣'],
-  ['/seller/ai-hunter', 'Hunting', '✦'],
+  ['/seller/ai-hunter', 'HAQ AI', '✦'],
   ['/seller/listings', 'Jualan', '↗'],
 ]
 
@@ -166,7 +166,7 @@ export function workspaceMobileMoreGroupsForRole(role) {
 export function workspacePathIsActive(path, href) {
   if (href === '/seller') return path === href
   if (href === '/seller/inventory') return path.startsWith(href)
-  if (href === '/seller/ai-hunter') return path === href || path === '/seller/sourcing'
+  if (href === '/seller/ai-hunter') return path.startsWith(href) || path === '/seller/sourcing'
   if (href === '/seller/listings') return path === href || path === '/seller/sales'
   if (href === '/seller/analytics') return ADMIN_INSIGHT_TABS.some((tab) => path === tab.href)
   if (href === '/seller/settings') return ADMIN_SETTINGS_TABS.some((tab) => path === tab.href)
@@ -241,11 +241,15 @@ export function makeListingTrackerUpdate(listing, values, now = new Date().toISO
 }
 
 export function huntingTabForPath(path) {
-  return path === '/seller/sourcing' ? 'finds' : 'research'
+  if (path === '/seller/sourcing') return 'finds'
+  if (path === '/seller/ai-hunter/research') return 'research'
+  return 'chat'
 }
 
 export function huntingPathForTab(tab) {
-  return tab === 'finds' ? '/seller/sourcing' : '/seller/ai-hunter'
+  if (tab === 'finds') return '/seller/sourcing'
+  if (tab === 'research') return '/seller/ai-hunter/research'
+  return '/seller/ai-hunter'
 }
 
 export function sourcingCandidateStatusLabel(status) {

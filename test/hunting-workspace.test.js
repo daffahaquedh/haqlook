@@ -11,24 +11,29 @@ const [sellerSource, hunterSource, sellerStyles, hunterStyles, conversionMigrati
   readFile(new URL('../supabase/migrations/20260926082014_hunter_sourcing_copilot_v1.sql', import.meta.url), 'utf8'),
 ])
 
-test('legacy Hunter and Sourcing URLs select their matching view in the shared workspace', () => {
-  assert.equal(huntingTabForPath('/seller/ai-hunter'), 'research')
+test('legacy AI Hunter route opens HAQ AI chat while Riset and Sourcing links remain available', () => {
+  assert.equal(huntingTabForPath('/seller/ai-hunter'), 'chat')
+  assert.equal(huntingTabForPath('/seller/ai-hunter/research'), 'research')
   assert.equal(huntingTabForPath('/seller/sourcing'), 'finds')
-  assert.equal(huntingPathForTab('research'), '/seller/ai-hunter')
+  assert.equal(huntingPathForTab('chat'), '/seller/ai-hunter')
+  assert.equal(huntingPathForTab('research'), '/seller/ai-hunter/research')
   assert.equal(huntingPathForTab('finds'), '/seller/sourcing')
   assert.match(sellerSource, /section === 'ai-hunter' \|\| section === 'sourcing'.*<HuntingWorkspace path=\{workspacePath\} \/>/)
 })
 
-test('Hunting view navigation exposes accessible selected state and preserves the legacy URLs', () => {
-  assert.match(sellerSource, /<nav className="hunting-workspace-tabs" aria-label="Hunting">/)
-  assert.match(sellerSource, /href="\/seller\/ai-hunter" aria-current=\{activeTab === 'research' \? 'page' : undefined\}/)
+test('HAQ AI, Riset and Temuan tabs expose selected states and preserve existing URLs', () => {
+  assert.match(sellerSource, /<nav className="hunting-workspace-tabs" aria-label="HAQ AI">/)
+  assert.match(sellerSource, /href="\/seller\/ai-hunter" aria-current=\{activeTab === 'chat' \? 'page' : undefined\}/)
+  assert.match(sellerSource, /href="\/seller\/ai-hunter\/research" aria-current=\{activeTab === 'research' \? 'page' : undefined\}/)
   assert.match(sellerSource, /href="\/seller\/sourcing" aria-current=\{activeTab === 'finds' \? 'page' : undefined\}/)
 })
 
-test('secondary view mounts on first visit and remains mounted when switching tabs', () => {
+test('HAQ AI, Riset and Temuan views mount lazily and stay mounted when tab selection changes', () => {
   assert.match(sellerSource, /const \[visitedTabs, setVisitedTabs\] = useState\(\(\) => new Set\(\[activeTab\]\)\)/)
+  assert.match(sellerSource, /visitedTabs\.has\('chat'\).*<HaqAIChatPage/)
   assert.match(sellerSource, /visitedTabs\.has\('research'\).*<HunterChatPage embedded/)
   assert.match(sellerSource, /visitedTabs\.has\('finds'\).*<SourcingPage embedded/)
+  assert.match(sellerSource, /hidden=\{activeTab !== 'chat'\}/)
   assert.match(sellerSource, /hidden=\{activeTab !== 'research'\}/)
   assert.match(sellerSource, /hidden=\{activeTab !== 'finds'\}/)
 })
@@ -76,7 +81,7 @@ test('empty saved-finds state guides the seller back to Riset', () => {
   assert.match(sellerSource, /Belum ada temuan tersimpan\./)
   assert.match(sellerSource, /Simpan target dari Riset untuk memantaunya di sini\./)
   assert.match(sellerSource, /Mulai Riset →/)
-  assert.match(sellerSource, /onOpenResearch=\{\(\) => go\('\/seller\/ai-hunter'\)\}/)
+  assert.match(sellerSource, /onOpenResearch=\{\(\) => go\('\/seller\/ai-hunter\/research'\)\}/)
 })
 
 test('mobile Hunting tabs and candidate controls keep touch sizing and iOS safe-area spacing', () => {

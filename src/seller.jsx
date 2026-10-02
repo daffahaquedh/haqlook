@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { HunterAnalyticsPage, HunterChatPage } from './hunter'
+import HaqAIChatPage from './haq-ai.jsx'
 import { AI_ENABLED, supabase } from './supabase-client'
 import ListingGenerator from './listing-generator'
 import { normalizeInstagramProfile, normalizeWhatsAppNumber, resolveStorefrontContact } from './store-contact.js'
@@ -153,16 +154,18 @@ function HuntingWorkspace({ path }) {
     go(huntingPathForTab(tab))
   }
 
-  return <div className="hunting-workspace">
+  return <div className="hunting-workspace haq-ai-workspace">
     <header className="hunting-workspace-heading">
-      <div><span className="seller-kicker">SELLER WORKSPACE / HUNTING</span><h1>Hunting</h1><p>Cari peluang barang dan kelola temuan yang sudah disimpan.</p></div>
+      <div><span className="seller-kicker">SELLER WORKSPACE / HAQ AI</span><h1>HAQ AI</h1><p>Asisten praktis untuk operasional toko Haqlooks.</p></div>
     </header>
-    <nav className="hunting-workspace-tabs" aria-label="Hunting">
-      <a href="/seller/ai-hunter" aria-current={activeTab === 'research' ? 'page' : undefined} className={activeTab === 'research' ? 'active' : ''} onClick={(event) => selectTab(event, 'research')}><span>Riset</span><small>Cari target barang</small></a>
-      <a href="/seller/sourcing" aria-current={activeTab === 'finds' ? 'page' : undefined} className={activeTab === 'finds' ? 'active' : ''} onClick={(event) => selectTab(event, 'finds')}><span>Temuan tersimpan</span><small>Pantau sebelum dibeli</small></a>
+    <nav className="hunting-workspace-tabs" aria-label="HAQ AI">
+      <a href="/seller/ai-hunter" aria-current={activeTab === 'chat' ? 'page' : undefined} className={activeTab === 'chat' ? 'active' : ''} onClick={(event) => selectTab(event, 'chat')}><span>Chat</span></a>
+      <a href="/seller/ai-hunter/research" aria-current={activeTab === 'research' ? 'page' : undefined} className={activeTab === 'research' ? 'active' : ''} onClick={(event) => selectTab(event, 'research')}><span>Riset</span></a>
+      <a href="/seller/sourcing" aria-current={activeTab === 'finds' ? 'page' : undefined} className={activeTab === 'finds' ? 'active' : ''} onClick={(event) => selectTab(event, 'finds')}><span>Temuan</span></a>
     </nav>
+    {visitedTabs.has('chat') && <section className="hunting-workspace-panel" aria-label="Chat HAQ AI" hidden={activeTab !== 'chat'}><HaqAIChatPage onStartResearch={() => go('/seller/ai-hunter/research')} /></section>}
     {visitedTabs.has('research') && <section className="hunting-workspace-panel" aria-label="Riset" hidden={activeTab !== 'research'}><HunterChatPage embedded onOpenFinds={() => go('/seller/sourcing')} /></section>}
-    {visitedTabs.has('finds') && <section className="hunting-workspace-panel" aria-label="Temuan tersimpan" hidden={activeTab !== 'finds'}><SourcingPage embedded onOpenProduct={(productId) => go(`/seller/inventory/${productId}`)} onOpenResearch={() => go('/seller/ai-hunter')} /></section>}
+    {visitedTabs.has('finds') && <section className="hunting-workspace-panel" aria-label="Temuan" hidden={activeTab !== 'finds'}><SourcingPage embedded onOpenProduct={(productId) => go(`/seller/inventory/${productId}`)} onOpenResearch={() => go('/seller/ai-hunter/research')} /></section>}
   </div>
 }
 
@@ -318,7 +321,7 @@ function SellerDashboard({ profile, analytics = false }) {
     <section className="dashboard-quick-actions" aria-label="Aksi cepat">
       <DashboardQuickAction href="/seller/inventory/new" icon="＋" title="Tambah barang" detail="Catat stok baru" />
       <DashboardQuickAction href="/seller/inventory" icon="▣" title="Cek barang" detail="Lihat daftar barang" />
-      <DashboardQuickAction href="/seller/ai-hunter" icon="✦" title="Mulai hunting" detail="Cari peluang" />
+      <DashboardQuickAction href="/seller/ai-hunter" icon="✦" title="Buka HAQ AI" detail="Tanya kebutuhan toko" />
     </section>
     <section className="dashboard-home-stats" aria-label="Ringkasan usaha">
       <Stat label="Barang tersedia" value={metric(summary?.available)} tone="green" />
