@@ -1,0 +1,55 @@
+.haq-ai-chat{width:min(100%,900px);min-width:0;margin:0 auto;display:flex;flex-direction:column;gap:14px;color:#e9e5d8}
+.haq-ai-intro{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:0 1px 10px;border-bottom:1px solid #29352e}
+.haq-ai-intro>span{color:#72ad96;font-size:.59rem;font-weight:900;letter-spacing:.15em}
+.haq-ai-intro>p{max-width:34ch;margin:0;color:#94a197;font-size:.68rem;line-height:1.45;text-align:right}
+.haq-ai-empty{display:grid;gap:15px;padding:clamp(15px,3vw,25px);border:1px solid #2a392f;background:#101612}
+.haq-ai-welcome{display:flex;align-items:center;gap:12px}
+.haq-ai-mark{width:42px;height:42px;flex:0 0 42px;display:grid;place-items:center;border:1px solid #517766;border-radius:50%;background:#1b3329;color:#cfe5d4;font:900 1.15rem Georgia,serif}
+.haq-ai-welcome strong{color:#eee8da;font-size:1rem}
+.haq-ai-welcome p{margin:5px 0 0;color:#97a398;font-size:.72rem;line-height:1.5}
+.haq-ai-starters{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.haq-ai-starters button{min-width:0;min-height:48px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;border:1px solid #35473c;border-radius:5px;background:#141d17;color:#d9e0d5;text-align:left;font-size:.72rem;font-weight:800;cursor:pointer}
+.haq-ai-starters button:hover{border-color:#56836e;background:#1a2a20}
+.haq-ai-starters button span{color:#78b395;font-size:.9rem}
+.haq-ai-transcript{display:grid;align-content:start;gap:10px;min-width:0;max-height:min(52vh,560px);min-height:180px;overflow-y:auto;overscroll-behavior:contain;padding:2px 2px 4px;scroll-padding-bottom:12px}
+.haq-ai-message{width:fit-content;max-width:min(88%,720px);min-width:0;padding:12px 14px;border:1px solid #2e3d33;border-radius:8px;background:#111813;overflow-wrap:anywhere}
+.haq-ai-message.user{justify-self:end;border-color:#3a624f;background:#1a2c22}
+.haq-ai-message small{color:#82b89b;font-size:.56rem;font-weight:900;letter-spacing:.12em}
+.haq-ai-message p{margin:5px 0 0;color:#e4e5da;font-size:.82rem;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
+.haq-ai-thinking{display:flex;align-items:center;gap:9px;color:#a4b7a8;font-size:.72rem}
+.haq-ai-spinner{width:15px;height:15px;flex:0 0 15px;display:inline-block;border:2px solid #3a5847;border-top-color:#8dc9a6;border-radius:50%;animation:haq-ai-spin .8s linear infinite;vertical-align:middle}
+@keyframes haq-ai-spin{to{transform:rotate(360deg)}}
+.haq-ai-error,.haq-ai-disabled{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0;padding:11px 12px;border:1px solid #74483b;background:#241713;color:#efb29d;font-size:.72rem;line-height:1.45;overflow-wrap:anywhere}
+.haq-ai-error button{min-height:44px;flex:0 0 auto;padding:0 12px;border:1px solid #95604c;border-radius:4px;background:#35221b;color:#ffddc5;font-size:.68rem;font-weight:900}
+.haq-ai-disabled{display:block;border-color:#655332;background:#211b11;color:#e0c989}
+.haq-ai-research-prompt{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px;border:1px solid #74633d;background:#211c12}
+.haq-ai-research-prompt>div{min-width:0}
+.haq-ai-research-prompt strong{color:#f1d79e;font-size:.75rem}
+.haq-ai-research-prompt p{margin:4px 0 0;color:#c4b993;font-size:.67rem;line-height:1.45;overflow-wrap:anywhere}
+.haq-ai-research-prompt button{min-height:46px;flex:0 0 auto;padding:0 13px;border:1px solid #a98d50;border-radius:4px;background:#e5d8b7;color:#262216;font-size:.67rem;font-weight:900}
+.haq-ai-composer{position:relative;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px;min-width:0;padding:9px;border:1px solid #35463b;border-radius:7px;background:#111713}
+.haq-ai-composer textarea{width:100%;min-width:0;min-height:48px;max-height:150px;resize:vertical;border:1px solid #324238;border-radius:4px;background:#0b100c;color:#eee8da;padding:12px;font:inherit;font-size:16px;line-height:1.45;outline:none}
+.haq-ai-composer textarea:focus{border-color:#589276;box-shadow:0 0 0 2px #58927633}
+.haq-ai-composer textarea::placeholder{color:#78887c}
+.haq-ai-composer>button{min-width:92px;min-height:48px;display:flex;align-items:center;justify-content:center;gap:7px;padding:0 13px;border:1px solid #8bb69a;border-radius:4px;background:#e2ddca;color:#172119;font-size:.7rem;font-weight:900}
+.haq-ai-composer>button:disabled{opacity:.52}
+.haq-ai-composer>small{grid-column:1/-1;padding:0 2px;color:#839287;font-size:.59rem}
+.haq-ai-chat button:focus-visible{outline:2px solid #9cdbb2;outline-offset:2px}
+@media(max-width:700px){
+  .haq-ai-chat{gap:11px}
+  .haq-ai-intro{align-items:flex-start;flex-direction:column;gap:6px;padding-bottom:9px}
+  .haq-ai-intro>p{max-width:40ch;text-align:left;font-size:.67rem}
+  .haq-ai-empty{gap:12px;padding:13px}
+  .haq-ai-starters{gap:7px}
+  .haq-ai-starters button{min-height:48px;padding:8px;font-size:.66rem}
+  .haq-ai-transcript{max-height:44vh;min-height:170px;gap:8px}
+  .haq-ai-message{max-width:94%;padding:10px 11px}
+  .haq-ai-message p{font-size:.78rem}
+  .haq-ai-composer{grid-template-columns:minmax(0,1fr) 78px;gap:6px;padding:7px}
+  .haq-ai-composer textarea{min-height:48px;padding:10px;font-size:16px}
+  .haq-ai-composer>button{min-width:78px;min-height:48px;padding:0 7px;font-size:.65rem}
+  .haq-ai-composer>small{font-size:.56rem}
+  .haq-ai-research-prompt{align-items:stretch;flex-direction:column}
+  .haq-ai-research-prompt button{width:100%;min-height:48px}
+}
+@media(prefers-reduced-motion:reduce){.haq-ai-spinner{animation:none;border-color:#8dc9a6;border-right-color:transparent}}

@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { DEFAULT_MODEL, estimateHunterCostIdr, hunterReservationCostIdr } from './pricing.ts'
-import { buildHunterChatContext, createHunterBriefRequest, createHunterChatRequest, createHunterItemCheckRequest, HUNTER_OPENAI_TIMEOUT_MS, isHunterReasoningQuestion } from './hunter-analysis.ts'
+import { buildHunterChatContext, createHaqAiChatRequest, createHunterBriefRequest, createHunterChatRequest, createHunterItemCheckRequest, HUNTER_OPENAI_TIMEOUT_MS, isHunterReasoningQuestion } from './hunter-analysis.ts'
+import { boundHaqAiContext, isHaqAiGreeting, jakartaMonthRange, routeHaqAiContext } from './haq-ai-context.js'
 import { countWebSearchCalls, extractHunterCitations, findHunterTarget, hunterResearchDecision, hunterResponseMetrics, parseCompletedHunterJson, responsesOutputText, sanitizeHunterBrief, shouldReadHunterCache, summarizeHaqlooksData } from './hunter-utils.ts'
 import { accountingRequestKey, finalizeAiUsage, releaseAiUsage, reserveAiUsage } from './usage-accounting.ts'
 
@@ -118,11 +119,11 @@ async function saveMessage(client: AnyClient, user: HunterUser, sessionId: strin
 }
 
 async function getConversation(client: AnyClient, sessionId: string) {
-  const { data, error } = await client.from('hunter_messages').select('role,content,message_kind,metadata').eq('session_id', sessionId).order('created_at', { ascending: false }).limit(20)
+  const { data, error } = await client.from('hunter_messages').select('role,content,message_kind').eq('session_id', sessionId).order('created_at', { ascending: false }).limit(30)
   if (error) return []
-  const rows = (data || []).reverse().filter((row: Record<string, unknown>) => row.role === 'user' || row.role === 'assistant')
-  if (rows.at(-1)?.role === 'user') rows.pop() // Current request is provided separately to the model.
-  return rows.map((row: Record<string, unknown>) => ({ role: row.role, content: redactChatText(row.content) }))
+  const rows = (data || []).reverse().filter((row: Record<string, unknown>) => (row.role === 'user' || row.role === 'assistant') && row.message_kind === 'chat')
+  if (rows.at(-1)?.role === 'user') rows.pop() // The new question is supplied separately.
+  return rows.slice(-6).map((row: Record<string, unknown>) => ({ role: row.role, content: redactChatText(row.content).slice(0, 600) }))
 }
 
 async function currentBriefId(client: AnyClient, sessionId: string) {
@@ -231,6 +232,126 @@ async function handleResearch(input: HandlerInput, client: AnyClient, admin: Any
     if (status) return failure(status === 429 ? 'AI_RATE_LIMITED' : 'AI_PROVIDER_ERROR', openAiErrorMessage(status), status === 429 ? 429 : 502, input.corsHeaders)
     if (String((error as Error)?.message).includes('AI_USAGE_FINALIZE_FAILED')) return failure('AI_USAGE_FINALIZE_FAILED', 'The research completed but usage could not be recorded.', 500, input.corsHeaders)
     return failure(errorCode || 'HUNTER_RESEARCH_FAILED', 'Hunting research could not be completed. Try again or keep using the manual sourcing list.', 502, input.corsHeaders)
+  }
+}
+
+async function loadHaqAiContext(client: AnyClient, message: string) {
+  const route = routeHaqAiContext(message)
+  if (route.type === 'none') return { type: 'general' }
+
+  if (route.type === 'product' || route.type === 'product_search') {
+    let rows: Record<string, unknown>[] = []
+    if (route.type === 'product') {
+      const { data, error } = await client.from('products')
+        .select('id,sku,name,brand,model,category,size_label,condition,status,price_idr,purchase_price,created_at')
+        .eq('sku', route.sku).limit(1).maybeSingle()
+      if (error) return { type: route.type, context_unavailable: true }
+      rows = data ? [data] : []
+    } else {
+      const term = String(route.term || '').replace(/[%_,()]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 48)
+      if (!term) return { type: 'product_search', results: [], note: 'Minta SKU atau nama barang yang lebih spesifik.' }
+      const { data, error } = await client.from('products')
+        .select('id,sku,name,brand,model,category,size_label,condition,status,price_idr,created_at')
+        .ilike('name', `%${term}%`).limit(5)
+      if (error) return { type: route.type, context_unavailable: true }
+      rows = data || []
+    }
+    const results = []
+    for (const product of rows) {
+      const [{ data: listings }, { data: sales }] = route.type === 'product' ? await Promise.all([
+        client.from('marketplace_listings').select('marketplace,listing_status,listed_price').eq('product_id', product.id).limit(6),
+        client.from('sales').select('sold_at,sold_via,sale_price,gross_profit,net_profit').eq('product_id', product.id).order('sold_at', { ascending: false }).limit(1),
+      ]) : [{ data: [] }, { data: [] }]
+      const { id, ...item } = product
+      results.push({ ...item, listings: listings || [], latest_sale: (sales || [])[0] || null })
+    }
+    return boundHaqAiContext({ type: route.type, results, not_found: results.length === 0 })
+  }
+
+  if (route.type === 'oldest_available') {
+    const { data, error } = await client.from('products')
+      .select('sku,name,brand,category,size_label,condition,status,price_idr,created_at')
+      .eq('status', 'available').order('created_at', { ascending: true }).limit(5)
+    return boundHaqAiContext({ type: route.type, context_unavailable: Boolean(error), results: data || [] })
+  }
+
+  if (route.type === 'monthly_sales') {
+    const range = jakartaMonthRange()
+    const { data, error, count } = await client.from('sales')
+      .select('sold_at,sale_price,gross_profit,net_profit', { count: 'exact' })
+      .gte('sold_at', range.start).lt('sold_at', range.end)
+      .order('sold_at', { ascending: false }).limit(2000)
+    if (error) return { type: route.type, context_unavailable: true }
+    const rows = data || []
+    const countValue = Number(count ?? rows.length)
+    return {
+      type: route.type,
+      month: range.start.slice(0, 7),
+      transactions: countValue,
+      revenue_idr: rows.reduce((sum, row) => sum + Number(row.sale_price || 0), 0),
+      gross_profit_idr: rows.reduce((sum, row) => sum + Number(row.gross_profit || 0), 0),
+      net_profit_idr: rows.reduce((sum, row) => sum + Number(row.net_profit || 0), 0),
+      complete: countValue <= rows.length,
+      sampled_rows: countValue > rows.length ? rows.length : undefined,
+    }
+  }
+
+  if (route.type === 'active_listings') {
+    const { data, error } = await client.from('marketplace_listings')
+      .select('marketplace,listing_status,listed_price,products!inner(sku,name,brand,status)')
+      .eq('listing_status', 'LISTED').order('last_updated', { ascending: false }).limit(8)
+    return boundHaqAiContext({ type: route.type, context_unavailable: Boolean(error), results: data || [] })
+  }
+
+  if (route.type === 'saved_finds') {
+    const { data, error } = await client.from('sourcing_candidates')
+      .select('title,brand,category,source_platform,seller_asking_price,estimated_resale_min,estimated_resale_max,max_buy_price,status')
+      .order('created_at', { ascending: false }).limit(6)
+    return boundHaqAiContext({ type: route.type, context_unavailable: Boolean(error), results: data || [] })
+  }
+
+  if (route.type === 'store_summary') {
+    const { data, error } = await client.rpc('seller_dashboard_summary')
+    return boundHaqAiContext({ type: route.type, context_unavailable: Boolean(error), summary: data || null })
+  }
+
+  return { type: 'general' }
+}
+
+async function handleHaqAiChat(input: HandlerInput, client: AnyClient, session: Record<string, unknown>, message: string) {
+  const safeMessage = redactChatText(message)
+  const feature = 'HUNTER_CHAT'
+  let usageId = ''
+  let providerResponded = false
+  let contextScope = 'general'
+  try {
+    const context = await loadHaqAiContext(client, safeMessage)
+    const conversation = await getConversation(client, String(session.id))
+    contextScope = String(context.type || 'general')
+    usageId = await reserveUsage(input.accounting, input.user.id, feature, DEFAULT_MODEL, 'low', hunterReservationCostIdr(DEFAULT_MODEL, 'chat'), accountingRequestKey(input.body.request_id), { mode: 'haq_ai_v1', context_scope: contextScope, web_search: false })
+    const payload = await fetchOpenAi(createHaqAiChatRequest({ message: safeMessage, context, conversation }), input.openAiKey)
+    providerResponded = true
+    let result: Record<string, unknown>
+    try { result = parseCompletedHunterJson(payload) as Record<string, unknown> } catch {
+      await finalizeUsage(input.accounting, input.user.id, usageId, feature, payload, { mode: 'haq_ai_v1', context_scope: contextScope, web_search: false, invalid_response: true })
+      return failure('AI_INVALID_RESPONSE', 'HAQ AI menerima jawaban yang belum bisa dibaca. Coba lagi; data barang tidak berubah.', 502, input.corsHeaders)
+    }
+    const usage = await finalizeUsage(input.accounting, input.user.id, usageId, feature, payload, { mode: 'haq_ai_v1', context_scope: contextScope, web_search: false })
+    const reply = String(result.reply || 'Aku belum mendapat jawaban yang cukup. Coba tanya dengan SKU atau detail yang lebih spesifik.').slice(0, 1800)
+    const suggestion = result.research_suggestion && typeof result.research_suggestion === 'object'
+      ? { needed: Boolean(result.research_suggestion.needed), reason: String(result.research_suggestion.reason || '').slice(0, 240) }
+      : { needed: false, reason: '' }
+    await saveMessage(client, input.user, String(session.id), 'assistant', reply, 'chat', { assistant_mode: 'haq_ai_v1', research_suggestion: suggestion })
+    return jsonResponse({ ok: true, feature, assistant_mode: 'haq_ai_v1', model: DEFAULT_MODEL, reasoning_effort: 'low', web_search: false, session_id: session.id, assistant_message: reply, research_suggestion: suggestion, usage }, 200, input.corsHeaders)
+  } catch (error) {
+    if (usageId && !providerResponded) await releaseUsage(input.accounting, input.user.id, usageId)
+    const errorCode = String((error as Record<string, unknown>)?.code || '')
+    if (errorCode === 'AI_MONTHLY_BUDGET_REACHED') return failure(errorCode, 'AI monthly budget reached', 429, input.corsHeaders)
+    if (errorCode === 'AI_DUPLICATE_REQUEST') return failure('DUPLICATE_REQUEST', 'Pesan ini sudah diproses. Coba lagi setelah memeriksa percakapan.', 409, input.corsHeaders)
+    if (error instanceof Error && error.name === 'AbortError') return failure('AI_TIMEOUT', 'HAQ AI belum selesai menjawab. Coba lagi sebentar.', 504, input.corsHeaders)
+    const status = Number((error as Record<string, unknown>)?.status || 0)
+    if (status) return failure(status === 429 ? 'AI_RATE_LIMITED' : 'AI_PROVIDER_ERROR', openAiErrorMessage(status), status === 429 ? 429 : 502, input.corsHeaders)
+    return failure(errorCode || 'HAQ_AI_CHAT_FAILED', 'HAQ AI sedang tidak tersedia. Data toko tetap aman dan tidak berubah.', 502, input.corsHeaders)
   }
 }
 
@@ -355,8 +476,12 @@ export async function handleHunterRequest(input: HandlerInput) {
   const feature = String(input.body.feature || '')
   if (!HUNTER_FEATURES.has(feature)) return failure('INVALID_FEATURE', 'Hunter feature is not enabled.', 400, input.corsHeaders)
   if (!['ADMIN', 'SELLER'].includes(String(input.role).toUpperCase())) return failure('ROLE_NOT_ALLOWED', 'This action is limited to ADMIN and SELLER accounts.', 403, input.corsHeaders)
+  const haqAiMode = feature === 'HUNTER_CHAT' && input.body.assistant_mode === 'haq_ai_v1'
+  if (haqAiMode && isHaqAiGreeting(input.body.message)) {
+    return jsonResponse({ ok: true, assistant_mode: 'haq_ai_v1', local: true, assistant_message: 'Halo! Aku HAQ AI, asisten untuk kebutuhan toko Haqlooks. Aku bisa bantu cek barang, Temuan, listing, penjualan, dan operasional toko.', research_suggestion: { needed: false, reason: '' } }, 200, input.corsHeaders)
+  }
   if ((feature === 'HUNTER_DESTINATION_BRIEF' || feature === 'HUNTER_REFRESH') && hunterResearchDecision(feature, input.body.research_confirmed === true, false) === 'CONFIRMATION_REQUIRED') return failure('HUNTER_CONFIRMATION_REQUIRED', 'Tinjau rencana hunting dan tekan Mulai Research sebelum pencarian pasar dijalankan.', 428, input.corsHeaders)
-  if (feature === 'HUNTER_CHAT' && !isHunterReasoningQuestion(input.body.message)) return failure('HUNTER_LOCAL_ACTION_REQUIRED', 'Interaksi singkat harus diproses secara lokal. Kirim pertanyaan penalaran yang jelas untuk memakai Hunter Chat.', 400, input.corsHeaders)
+  if (feature === 'HUNTER_CHAT' && !haqAiMode && !isHunterReasoningQuestion(input.body.message)) return failure('HUNTER_LOCAL_ACTION_REQUIRED', 'Interaksi singkat harus diproses secara lokal. Kirim pertanyaan penalaran yang jelas untuk memakai Hunter Chat.', 400, input.corsHeaders)
   if (!input.openAiKey && (feature === 'HUNTER_CHAT' || feature === 'HUNTER_ITEM_CHECK')) return failure('AI_NOT_CONFIGURED', 'AI belum dikonfigurasi di server. Sourcing manual tetap tersedia.', 503, input.corsHeaders)
   const admin = input.accounting
 
@@ -364,13 +489,14 @@ export async function handleHunterRequest(input: HandlerInput) {
   try { session = await getOrCreateSession(input.supabase, input.user, input.body.session_id) } catch { return failure('HUNTER_SESSION_UNAVAILABLE', 'The Hunter session could not be loaded. Refresh Seller Panel and retry.', 403, input.corsHeaders) }
   const message = redactChatText(input.body.message)
   const isItemCheck = feature === 'HUNTER_ITEM_CHECK'
-  if (feature === 'HUNTER_CHAT' && !(await currentBriefId(input.supabase, String(session.id)))) return failure('HUNTER_BRIEF_REQUIRED', 'Buat atau muat Destination Brief sebelum meminta penjelasan Hunter Chat.', 409, input.corsHeaders)
-  const destination = safeDestination(input.body.destination || searchDestination(message) || session.destination)
-  if (destination && destination !== String(session.destination || '')) await updateSession(input.supabase, String(session.id), { destination })
+  if (feature === 'HUNTER_CHAT' && !haqAiMode && !(await currentBriefId(input.supabase, String(session.id)))) return failure('HUNTER_BRIEF_REQUIRED', 'Buat atau muat Destination Brief sebelum meminta penjelasan Hunter Chat.', 409, input.corsHeaders)
+  const destination = haqAiMode ? '' : safeDestination(input.body.destination || searchDestination(message) || session.destination)
+  if (!haqAiMode && destination && destination !== String(session.destination || '')) await updateSession(input.supabase, String(session.id), { destination })
   if (feature === 'HUNTER_DESTINATION_BRIEF' || feature === 'HUNTER_REFRESH') return handleResearch(input, input.supabase, admin, session, feature, message)
   const safeUserMessage = isItemCheck ? `Photo check: ${String(input.body.target?.item_name || 'item').slice(0, 100)} · asking price ${idrValue(input.body.asking_price_idr) || 'not set'} IDR.` : message
   try { await saveMessage(input.supabase, input.user, String(session.id), 'user', safeUserMessage, isItemCheck ? 'item_check' : 'chat', {}) } catch { return failure('HUNTER_MESSAGE_SAVE_FAILED', 'Message could not be saved to this session.', 500, input.corsHeaders) }
   if (feature === 'HUNTER_ITEM_CHECK') return handleItemCheck(input, input.supabase, admin, session, message)
+  if (haqAiMode) return handleHaqAiChat(input, input.supabase, session, message)
   return handleChat(input, input.supabase, admin, session, message)
 }
 

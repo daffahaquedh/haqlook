@@ -89,6 +89,44 @@ export const HUNTER_CHAT_SCHEMA = {
   additionalProperties: false,
 }
 
+const HAQ_AI_SYSTEM_PROMPT = `You are HAQ AI, a helpful and concise store assistant for Haqlooks, an Indonesian pre-owned fashion reseller. Answer naturally in Bahasa Indonesia. Help with the seller's own products, inventory, saved sourcing finds, marketplace listings, sales, profit, and store operations. Use only facts provided in the compact internal context and recent messages; never invent inventory, prices, listing status, costs, profits, or sourcing availability. If context is missing or a query returned no records, say so plainly and ask for a SKU or more detail. Do not expose buyer or customer personal data. For off-topic questions, answer briefly when appropriate and steer back to Haqlooks. Normal chat is advisory/read-only: never create, edit, buy, list, mark sold, or convert records. Never perform web search. Set research_suggestion.needed only when current external market research would materially help; this only offers a separate explicit confirmation flow and does not start research. Keep the answer concise and return the required JSON.`
+
+export const HAQ_AI_CHAT_SCHEMA = {
+  type: 'object',
+  properties: {
+    reply: { type: 'string' },
+    research_suggestion: {
+      type: 'object',
+      properties: { needed: { type: 'boolean' }, reason: { type: 'string' } },
+      required: ['needed', 'reason'],
+      additionalProperties: false,
+    },
+  },
+  required: ['reply', 'research_suggestion'],
+  additionalProperties: false,
+}
+
+export function createHaqAiChatRequest({ message, context, conversation = [] }) {
+  const input = [
+    { role: 'system', content: HAQ_AI_SYSTEM_PROMPT },
+    ...conversation.slice(-6).map(({ role, content }) => ({
+      role: role === 'assistant' ? 'assistant' : 'user',
+      content: String(content || '').slice(0, 600),
+    })),
+    {
+      role: 'user',
+      content: `SELLER QUESTION: ${String(message || '').slice(0, 800)}\nCOMPACT INTERNAL CONTEXT: ${JSON.stringify(context || { scope: 'general' }).slice(0, 6000)}`,
+    },
+  ]
+  return {
+    model: DEFAULT_MODEL,
+    reasoning: { effort: 'low' },
+    max_output_tokens: 1000,
+    input,
+    text: { format: { type: 'json_schema', name: 'haq_ai_chat_reply', strict: true, schema: HAQ_AI_CHAT_SCHEMA } },
+  }
+}
+
 export const HUNTER_ITEM_CHECK_SCHEMA = {
   type: 'object',
   properties: {

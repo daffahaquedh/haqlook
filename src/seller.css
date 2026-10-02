@@ -328,7 +328,7 @@
 .hunting-workspace-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin:0 0 15px}
 .hunting-workspace-heading h1{margin:7px 0 0;color:#efe6d2;font:900 clamp(2.15rem,4vw,3.25rem)/.92 Georgia,'Times New Roman',serif;letter-spacing:-.07em}
 .hunting-workspace-heading p{margin:9px 0 0;color:#98a59b;font-size:.78rem;line-height:1.45}
-.hunting-workspace-tabs{position:relative;z-index:25;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;margin:0 0 15px;padding:5px;border:1px solid #293a30;border-radius:6px;background:#0f1511}
+.hunting-workspace-tabs{position:relative;z-index:25;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin:0 0 15px;padding:5px;border:1px solid #293a30;border-radius:6px;background:#0f1511}
 .hunting-workspace-tabs a{min-width:0;min-height:52px;display:flex;align-items:center;justify-content:center;gap:9px;padding:8px 14px;border:1px solid transparent;border-radius:4px;color:#9aa79d;text-decoration:none;text-align:center}
 .hunting-workspace-tabs a span{font-size:.76rem;font-weight:900}
 .hunting-workspace-tabs a small{color:#76867b;font-size:.6rem}
