@@ -1,7 +1,7 @@
 const MAX_BODY_BYTES = 64 * 1024
 const EBAY_OAUTH_URL = 'https://api.ebay.com/identity/v1/oauth2/token'
 const EBAY_PUBLIC_KEY_URL = 'https://api.ebay.com/commerce/notification/v1/public_key/'
-const EBAY_SIGNATURE_ALGORITHM = Object.freeze({ name: 'ECDSA', hash: 'SHA-1' })
+const MAX_PUBLIC_KEY_DER_BYTES = 512
 const PUBLIC_KEY_TTL_MS = 60 * 60 * 1000
 const REQUEST_TIMEOUT_MS = 8_000
 const SAFE_CRYPTO_ERROR_NAMES = new Set(['Error', 'TypeError', 'RangeError', 'NotSupportedError', 'OperationError', 'DataError'])
@@ -37,76 +37,46 @@ function readSignatureHeader(raw) {
   }
 }
 
-function readDerLength(bytes, cursor) {
-  if (cursor.offset >= bytes.length) throw new Error('Invalid ECDSA signature')
-  const first = bytes[cursor.offset++]
-  if (first < 0x80) return first
-
-  const octetCount = first & 0x7f
-  if (octetCount === 0 || octetCount > 2 || cursor.offset + octetCount > bytes.length) {
-    throw new Error('Invalid ECDSA signature')
-  }
-  if (bytes[cursor.offset] === 0) throw new Error('Invalid ECDSA signature')
-
-  let length = 0
-  for (let index = 0; index < octetCount; index += 1) {
-    length = (length * 256) + bytes[cursor.offset++]
-  }
-  if (length < 0x80) throw new Error('Invalid ECDSA signature')
-  return length
-}
-
-function readDerInteger(bytes, cursor, sequenceEnd) {
-  if (cursor.offset >= sequenceEnd || bytes[cursor.offset++] !== 0x02) {
-    throw new Error('Invalid ECDSA signature')
-  }
-  const length = readDerLength(bytes, cursor)
-  const end = cursor.offset + length
-  if (length === 0 || end > sequenceEnd) throw new Error('Invalid ECDSA signature')
-
-  let integer = bytes.subarray(cursor.offset, end)
-  cursor.offset = end
-  if (integer[0] & 0x80) throw new Error('Invalid ECDSA signature')
-  if (integer.length > 1 && integer[0] === 0) {
-    if ((integer[1] & 0x80) === 0) throw new Error('Invalid ECDSA signature')
-    integer = integer.subarray(1)
-  }
-  if (integer.length > 32) throw new Error('Invalid ECDSA signature')
-  return integer
-}
-
-export function derEcdsaToP1363(signatureBytes) {
-  if (!(signatureBytes instanceof Uint8Array)) throw new Error('Invalid ECDSA signature')
-  const cursor = { offset: 0 }
-  if (signatureBytes[cursor.offset++] !== 0x30) throw new Error('Invalid ECDSA signature')
-  const sequenceLength = readDerLength(signatureBytes, cursor)
-  const sequenceEnd = cursor.offset + sequenceLength
-  if (sequenceEnd !== signatureBytes.length) throw new Error('Invalid ECDSA signature')
-
-  const r = readDerInteger(signatureBytes, cursor, sequenceEnd)
-  const s = readDerInteger(signatureBytes, cursor, sequenceEnd)
-  if (cursor.offset !== sequenceEnd) throw new Error('Invalid ECDSA signature')
-
-  const result = new Uint8Array(64)
-  result.set(r, 32 - r.length)
-  result.set(s, 64 - s.length)
-  return result
-}
-
-function decodeBase64(value) {
-  if (typeof value !== 'string' || !value || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+function decodeBase64(value, maxBytes = MAX_PUBLIC_KEY_DER_BYTES) {
+  if (typeof value !== 'string' || !value || value.length % 4 === 1 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
     throw new Error('Invalid base64 data')
   }
-  const binary = atob(value)
+  if (value.includes('=') && value.length % 4 !== 0) throw new Error('Invalid base64 data')
+  const padded = value.padEnd(value.length + ((4 - (value.length % 4)) % 4), '=')
+  const binary = atob(padded)
+  if (binary.length > maxBytes || btoa(binary).replace(/=+$/, '') !== value.replace(/=+$/, '')) {
+    throw new Error('Invalid base64 data')
+  }
   return Uint8Array.from(binary, (character) => character.charCodeAt(0))
 }
 
-function decodePublicKeySpki(publicKey) {
-  if (typeof publicKey !== 'string') throw new Error('Invalid public key')
-  const match = publicKey.match(/-----BEGIN PUBLIC KEY-----([\s\S]+?)-----END PUBLIC KEY-----/)
-  if (!match) throw new Error('Invalid public key')
-  return decodeBase64(match[1].replace(/\s/g, ''))
+function readDerElement(bytes, cursor, parentEnd) {
+  if (cursor.offset + 2 > parentEnd) throw new Error('Invalid SubjectPublicKeyInfo')
+  const tag = bytes[cursor.offset++]
+  const firstLength = bytes[cursor.offset++]
+  let length = firstLength
+  if (firstLength >= 0x80) {
+    const octetCount = firstLength & 0x7f
+    if (octetCount === 0 || octetCount > 2 || cursor.offset + octetCount > parentEnd) {
+      throw new Error('Invalid SubjectPublicKeyInfo')
+    }
+    if (bytes[cursor.offset] === 0) throw new Error('Invalid SubjectPublicKeyInfo')
+    length = 0
+    for (let index = 0; index < octetCount; index += 1) {
+      length = (length * 256) + bytes[cursor.offset++]
+    }
+    if (length < 0x80) throw new Error('Invalid SubjectPublicKeyInfo')
+  }
+  if (length > MAX_PUBLIC_KEY_DER_BYTES) throw new Error('Invalid SubjectPublicKeyInfo')
+  const contentStart = cursor.offset
+  const end = contentStart + length
+  if (end > parentEnd) throw new Error('Invalid SubjectPublicKeyInfo')
+  cursor.offset = end
+  return { tag, contentStart, end }
 }
+
+const OID_EC_PUBLIC_KEY = new Uint8Array([0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01])
+const OID_PRIME256V1 = new Uint8Array([0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07])
 
 function equalBytes(left, right) {
   if (left.byteLength !== right.byteLength) return false
@@ -116,43 +86,107 @@ function equalBytes(left, right) {
   return true
 }
 
-export async function verifyEbaySignature(
+function validateEcdsaDerSignature(signatureDer) {
+  // A P-256 ECDSA signature is a DER SEQUENCE of exactly two canonical
+  // positive INTEGERs. Validate encoding here, but leave all curve arithmetic
+  // and signature verification to the pinned Noble implementation.
+  if (!(signatureDer instanceof Uint8Array) || signatureDer.length < 8 || signatureDer.length > 72) {
+    throw new Error('Invalid ECDSA signature DER')
+  }
+  if (signatureDer[0] !== 0x30 || signatureDer[1] >= 0x80 || signatureDer[1] !== signatureDer.length - 2) {
+    throw new Error('Invalid ECDSA signature DER')
+  }
+
+  let offset = 2
+  for (let integerIndex = 0; integerIndex < 2; integerIndex += 1) {
+    if (signatureDer[offset] !== 0x02) throw new Error('Invalid ECDSA signature DER')
+    offset += 1
+    const length = signatureDer[offset]
+    offset += 1
+    if (!length || length > 33 || offset + length > signatureDer.length) {
+      throw new Error('Invalid ECDSA signature DER')
+    }
+    const first = signatureDer[offset]
+    if ((first & 0x80) !== 0) throw new Error('Invalid ECDSA signature DER')
+    if (length > 1 && first === 0 && (signatureDer[offset + 1] & 0x80) === 0) {
+      throw new Error('Invalid ECDSA signature DER')
+    }
+    offset += length
+  }
+  if (offset !== signatureDer.length) throw new Error('Invalid ECDSA signature DER')
+}
+
+export function parseSpkiP256PublicKey(publicKeyPem) {
+  if (typeof publicKeyPem !== 'string') throw new Error('Invalid SubjectPublicKeyInfo')
+  const match = /^\s*-----BEGIN PUBLIC KEY-----([\s\S]+?)-----END PUBLIC KEY-----\s*$/.exec(publicKeyPem)
+  if (!match) throw new Error('Invalid SubjectPublicKeyInfo')
+  const encoded = match[1].replace(/\s/g, '')
+  const der = decodeBase64(encoded, MAX_PUBLIC_KEY_DER_BYTES)
+  if (der.length === 0 || der.length > MAX_PUBLIC_KEY_DER_BYTES) throw new Error('Invalid SubjectPublicKeyInfo')
+
+  const outerCursor = { offset: 0 }
+  const outer = readDerElement(der, outerCursor, der.length)
+  if (outer.tag !== 0x30 || outer.end !== der.length) throw new Error('Invalid SubjectPublicKeyInfo')
+
+  const spkiCursor = { offset: outer.contentStart }
+  const algorithm = readDerElement(der, spkiCursor, outer.end)
+  if (algorithm.tag !== 0x30) throw new Error('Invalid SubjectPublicKeyInfo')
+  const algorithmCursor = { offset: algorithm.contentStart }
+  const publicKeyOid = readDerElement(der, algorithmCursor, algorithm.end)
+  const curveOid = readDerElement(der, algorithmCursor, algorithm.end)
+  if (
+    publicKeyOid.tag !== 0x06 ||
+    !equalBytes(der.subarray(publicKeyOid.contentStart, publicKeyOid.end), OID_EC_PUBLIC_KEY) ||
+    curveOid.tag !== 0x06 ||
+    !equalBytes(der.subarray(curveOid.contentStart, curveOid.end), OID_PRIME256V1) ||
+    algorithmCursor.offset !== algorithm.end
+  ) {
+    throw new Error('Unsupported SubjectPublicKeyInfo algorithm')
+  }
+
+  const bitString = readDerElement(der, spkiCursor, outer.end)
+  if (bitString.tag !== 0x03 || bitString.end !== outer.end) throw new Error('Invalid SubjectPublicKeyInfo')
+  const bitStringBytes = der.subarray(bitString.contentStart, bitString.end)
+  if (bitStringBytes.length !== 66 || bitStringBytes[0] !== 0 || bitStringBytes[1] !== 0x04) {
+    throw new Error('Invalid P-256 public point')
+  }
+  if (spkiCursor.offset !== outer.end) throw new Error('Invalid SubjectPublicKeyInfo')
+  return bitStringBytes.slice(1)
+}
+
+export function verifyEbaySignature(
   payload,
   signatureBase64,
   publicKey,
   rawBodyBytes,
-  subtleImpl = globalThis.crypto?.subtle,
+  nobleCrypto,
 ) {
-  if (!subtleImpl) throw new TypeError('Web Crypto unavailable')
   if (!(rawBodyBytes instanceof Uint8Array)) throw new TypeError('Raw request bytes unavailable')
+  if (!nobleCrypto || typeof nobleCrypto.sha1 !== 'function' || typeof nobleCrypto.p256?.verify !== 'function') {
+    throw new TypeError('Noble crypto unavailable')
+  }
 
   const canonicalBytes = new TextEncoder().encode(JSON.stringify(payload))
   const rawMatchesReserialized = equalBytes(rawBodyBytes, canonicalBytes)
-  const derSignature = decodeBase64(signatureBase64)
-  const p1363Signature = derEcdsaToP1363(derSignature)
-  const key = await subtleImpl.importKey(
-    'spki',
-    decodePublicKeySpki(publicKey),
-    { name: 'ECDSA', namedCurve: 'P-256' },
-    false,
-    ['verify'],
-  )
+  const signatureDer = decodeBase64(signatureBase64, 72)
+  validateEcdsaDerSignature(signatureDer)
+  const rawPublicKey = parseSpkiP256PublicKey(publicKey)
+  const verifyBytes = (messageBytes) => {
+    const digest = nobleCrypto.sha1(messageBytes)
+    if (!(digest instanceof Uint8Array) || digest.length !== 20) throw new Error('Invalid SHA-1 digest')
+    return nobleCrypto.p256.verify(
+      signatureDer,
+      digest,
+      rawPublicKey,
+      { prehash: false, format: 'der', lowS: false },
+    )
+  }
 
-  const canonicalValid = await subtleImpl.verify(
-    EBAY_SIGNATURE_ALGORITHM,
-    key,
-    p1363Signature,
-    canonicalBytes,
-  )
+  const canonicalValid = verifyBytes(canonicalBytes)
   if (canonicalValid) return { mode: 'canonical', rawMatchesReserialized }
 
   if (!rawMatchesReserialized) {
-    const rawValid = await subtleImpl.verify(
-      EBAY_SIGNATURE_ALGORITHM,
-      key,
-      p1363Signature,
-      rawBodyBytes,
-    )
+    const rawValid = verifyBytes(rawBodyBytes)
     if (rawValid) return { mode: 'raw', rawMatchesReserialized }
   }
 
@@ -314,7 +348,7 @@ export function createHandler({
   fetchImpl = fetch,
   now = Date.now,
   log = (stage, details) => console.info(JSON.stringify({ component: 'ebay-account-deletion', stage, ...details })),
-  subtleImpl = globalThis.crypto?.subtle,
+  nobleCrypto,
 }) {
   return async function handle(request) {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { Allow: 'GET, POST, OPTIONS' } })
@@ -375,7 +409,7 @@ export function createHandler({
         signature.signature,
         publicKey,
         rawBodyBytes,
-        subtleImpl,
+        nobleCrypto,
       )
     } catch (error) {
       diagnostic(log, 'signature_verify_exception', {
@@ -404,4 +438,3 @@ export function createHandler({
     return new Response(null, { status: 204 })
   }
 }
-
