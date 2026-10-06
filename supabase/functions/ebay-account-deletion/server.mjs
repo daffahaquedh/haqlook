@@ -82,25 +82,46 @@ function derEcdsaToP1363(bytes) {
   return result
 }
 
-async function fetchJson(fetchImpl, url, init) {
+async function fetchJsonResponse(fetchImpl, url, init) {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   try {
     const response = await fetchImpl(url, { ...init, signal: controller.signal })
-    if (!response.ok) return null
-    return await response.json()
+    let data = null
+    try {
+      data = await response.json()
+    } catch {
+      // Keep malformed or non-JSON provider responses out of diagnostics.
+    }
+    return { status: response.status, ok: response.ok, data }
   } catch {
-    return null
+    return { status: null, ok: false, data: null }
   } finally {
     clearTimeout(timeout)
   }
 }
 
-async function getApplicationToken({ appId, clientSecret, fetchImpl, now }) {
-  if (appTokenCache && appTokenCache.expiresAt > now() + 30_000) return appTokenCache.value
+function safeErrorCode(data) {
+  const code = data && typeof data.error === 'string' ? data.error : ''
+  return /^[A-Za-z0-9_.-]{1,80}$/.test(code) ? code : undefined
+}
+
+function diagnostic(log, stage, details = {}) {
+  try {
+    log(stage, details)
+  } catch {
+    // Diagnostics must never change callback behavior.
+  }
+}
+
+async function getApplicationToken({ appId, clientSecret, fetchImpl, now, log }) {
+  if (appTokenCache && appTokenCache.expiresAt > now() + 30_000) {
+    diagnostic(log, 'oauth_token_cache_hit')
+    return appTokenCache.value
+  }
 
   const credentials = btoa(`${appId}:${clientSecret}`)
-  const result = await fetchJson(fetchImpl, EBAY_OAUTH_URL, {
+  const response = await fetchJsonResponse(fetchImpl, EBAY_OAUTH_URL, {
     method: 'POST',
     headers: {
       Authorization: `Basic ${credentials}`,
@@ -108,30 +129,52 @@ async function getApplicationToken({ appId, clientSecret, fetchImpl, now }) {
     },
     body: 'grant_type=client_credentials&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope',
   })
-  if (!result || typeof result.access_token !== 'string' || !result.access_token || !Number.isFinite(Number(result.expires_in))) return null
+  if (response.status !== null) diagnostic(log, 'oauth_token_request_status', { status: response.status })
+  const result = response.data
+  if (!response.ok || !result || typeof result.access_token !== 'string' || !result.access_token || !Number.isFinite(Number(result.expires_in))) {
+    const errorCode = safeErrorCode(result)
+    diagnostic(log, 'oauth_token_failed', {
+      ...(response.status === null ? {} : { status: response.status }),
+      ...(errorCode ? { error_code: errorCode } : {}),
+    })
+    return null
+  }
 
   appTokenCache = {
     value: result.access_token,
     expiresAt: now() + Math.max(60, Number(result.expires_in) - 60) * 1000,
   }
+  diagnostic(log, 'oauth_token_succeeded', { status: response.status })
   return appTokenCache.value
 }
 
-async function getPublicKey({ kid, appId, clientSecret, fetchImpl, now }) {
+async function getPublicKey({ kid, appId, clientSecret, fetchImpl, now, log }) {
   const cached = keyCache.get(kid)
-  if (cached && cached.expiresAt > now()) return cached.value
+  if (cached && cached.expiresAt > now()) {
+    diagnostic(log, 'public_key_cache_hit')
+    return cached.value
+  }
 
-  const accessToken = await getApplicationToken({ appId, clientSecret, fetchImpl, now })
+  const accessToken = await getApplicationToken({ appId, clientSecret, fetchImpl, now, log })
   if (!accessToken) return null
-  const result = await fetchJson(fetchImpl, `${EBAY_PUBLIC_KEY_URL}${encodeURIComponent(kid)}`, {
+  const response = await fetchJsonResponse(fetchImpl, `${EBAY_PUBLIC_KEY_URL}${encodeURIComponent(kid)}`, {
     method: 'GET',
     headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
   })
-  if (!result || typeof result.key !== 'string' || !result.key.includes('BEGIN PUBLIC KEY')) return null
-  if (result.algorithm !== 'ECDSA' || result.digest !== 'SHA1') return null
+  if (response.status !== null) diagnostic(log, 'public_key_request_status', { status: response.status })
+  const result = response.data
+  if (!response.ok || !result || typeof result.key !== 'string' || !result.key.includes('BEGIN PUBLIC KEY') || result.algorithm !== 'ECDSA' || result.digest !== 'SHA1') {
+    const errorCode = safeErrorCode(result)
+    diagnostic(log, 'public_key_failed', {
+      ...(response.status === null ? {} : { status: response.status }),
+      ...(errorCode ? { error_code: errorCode } : {}),
+    })
+    return null
+  }
 
   keyCache.set(kid, { value: result.key, expiresAt: now() + PUBLIC_KEY_TTL_MS })
   if (keyCache.size > 100) keyCache.delete(keyCache.keys().next().value)
+  diagnostic(log, 'public_key_succeeded', { status: response.status })
   return result.key
 }
 
@@ -185,6 +228,7 @@ export function createHandler({
   getSecret,
   fetchImpl = fetch,
   now = Date.now,
+  log = (stage, details) => console.info(JSON.stringify({ component: 'ebay-account-deletion', stage, ...details })),
 }) {
   return async function handle(request) {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { Allow: 'GET, POST, OPTIONS' } })
@@ -222,33 +266,60 @@ export function createHandler({
     const signature = readSignatureHeader(request.headers.get('x-ebay-signature'))
     if (!signature) return json({ error: 'invalid_signature' }, 412)
 
-    const clientSecret = getSecret('EBAY_CLIENT_SECRET')
+    let clientSecret = ''
+    try {
+      clientSecret = getSecret('EBAY_CLIENT_SECRET')
+    } catch {
+      // Treat secret-store access failure as unavailable without logging details.
+    }
+    diagnostic(log, 'client_secret_present', { present: Boolean(clientSecret) })
     if (!appId || !clientSecret) return json({ error: 'signature_verification_unavailable' }, 503)
-    const publicKey = await getPublicKey({ kid: signature.kid, appId, clientSecret, fetchImpl, now })
+    const publicKey = await getPublicKey({ kid: signature.kid, appId, clientSecret, fetchImpl, now, log })
     if (!publicKey) return json({ error: 'signature_verification_unavailable' }, 503)
 
+    let key
     try {
-      const key = await crypto.subtle.importKey(
+      key = await crypto.subtle.importKey(
         'spki',
         decodeBase64(publicKey.replace(/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\s/g, '')),
         { name: 'ECDSA', namedCurve: 'P-256' },
         false,
         ['verify'],
       )
-      const signatureBytes = derEcdsaToP1363(decodeBase64(signature.signature))
-      const verified = await crypto.subtle.verify(
+    } catch {
+      diagnostic(log, 'signature_import_failed')
+      return json({ error: 'signature_verification_unavailable' }, 503)
+    }
+
+    let signatureBytes
+    try {
+      signatureBytes = derEcdsaToP1363(decodeBase64(signature.signature))
+    } catch {
+      diagnostic(log, 'signature_verify_failed')
+      return json({ error: 'invalid_signature' }, 412)
+    }
+
+    let verified
+    try {
+      verified = await crypto.subtle.verify(
         { name: 'ECDSA', hash: 'SHA-1' },
         key,
         signatureBytes,
         new TextEncoder().encode(JSON.stringify(payload)),
       )
-      if (!verified) return json({ error: 'invalid_signature' }, 412)
     } catch {
+      diagnostic(log, 'signature_verify_failed')
       return json({ error: 'signature_verification_unavailable' }, 503)
     }
+    if (!verified) {
+      diagnostic(log, 'signature_verify_failed')
+      return json({ error: 'invalid_signature' }, 412)
+    }
+    diagnostic(log, 'signature_verified')
 
     // HAQLOOKS currently persists no eBay user/customer data. A valid notice is
     // acknowledged without mutating unrelated business records.
     return new Response(null, { status: 204 })
   }
 }
+
