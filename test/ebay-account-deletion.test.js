@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createVerify } from 'node:crypto'
-import { createHandler, makeChallengeResponse, verifyEbaySignature } from '../supabase/functions/ebay-account-deletion/server.mjs'
+import { webcrypto } from 'node:crypto'
+import { createHandler, derEcdsaToP1363, makeChallengeResponse, verifyEbaySignature } from '../supabase/functions/ebay-account-deletion/server.mjs'
 
 const endpoint = 'https://akihuhhabslzhxyjxwoz.supabase.co/functions/v1/ebay-account-deletion'
 const token = 'A'.repeat(32)
@@ -21,8 +21,59 @@ const fixture = {
   publicKey: '-----BEGIN PUBLIC KEY-----MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEZhhxXKtR+TOvtDbgTPCkSof02qgBB7IsYOyf76ilExJ/upAa/vKIKheOoCyOpcLmi4t0b4uepb7LLjmMr90FUg==-----END PUBLIC KEY-----',
 }
 
-function makeHandler({ secrets = { EBAY_DELETION_VERIFY_TOKEN: token, EBAY_CLIENT_SECRET: 'fixture-secret' }, fetchImpl, log = () => {}, createVerifyImpl } = {}) {
-  return createHandler({ endpoint, appId, getSecret: (name) => secrets[name] || '', log, ...(fetchImpl ? { fetchImpl } : {}), ...(createVerifyImpl ? { createVerifyImpl } : {}) })
+function makeHandler({ secrets = { EBAY_DELETION_VERIFY_TOKEN: token, EBAY_CLIENT_SECRET: 'fixture-secret' }, fetchImpl, log = () => {}, subtleImpl } = {}) {
+  return createHandler({ endpoint, appId, getSecret: (name) => secrets[name] || '', log, ...(fetchImpl ? { fetchImpl } : {}), ...(subtleImpl ? { subtleImpl } : {}) })
+}
+
+function concatBytes(...arrays) {
+  const result = new Uint8Array(arrays.reduce((length, bytes) => length + bytes.length, 0))
+  let offset = 0
+  for (const bytes of arrays) {
+    result.set(bytes, offset)
+    offset += bytes.length
+  }
+  return result
+}
+
+function p1363ToDer(signature) {
+  const encodeInteger = (bytes) => {
+    let value = bytes
+    while (value.length > 1 && value[0] === 0) value = value.subarray(1)
+    if (value[0] & 0x80) value = concatBytes(new Uint8Array([0]), value)
+    return concatBytes(new Uint8Array([0x02, value.length]), value)
+  }
+  const r = encodeInteger(signature.subarray(0, 32))
+  const s = encodeInteger(signature.subarray(32, 64))
+  const content = concatBytes(r, s)
+  return concatBytes(new Uint8Array([0x30, content.length]), content)
+}
+
+function bytesToBase64(bytes) {
+  return btoa(String.fromCharCode(...bytes))
+}
+
+function publicKeyPem(spkiBytes) {
+  return `-----BEGIN PUBLIC KEY-----\n${bytesToBase64(spkiBytes)}\n-----END PUBLIC KEY-----`
+}
+
+async function signTextWithEphemeralKey(text) {
+  const pair = await webcrypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
+  const rawSignature = new Uint8Array(await webcrypto.subtle.sign(
+    { name: 'ECDSA', hash: 'SHA-1' },
+    pair.privateKey,
+    new TextEncoder().encode(text),
+  ))
+  const spkiBytes = new Uint8Array(await webcrypto.subtle.exportKey('spki', pair.publicKey))
+  return { signatureDer: p1363ToDer(rawSignature), publicKey: publicKeyPem(spkiBytes) }
+}
+
+function eBaySignatureHeader(signatureDer, kid = '6f9971b4-187b-4c67-9f60-49b910a6e741') {
+  return btoa(JSON.stringify({
+    alg: 'ecdsa',
+    kid,
+    signature: bytesToBase64(signatureDer),
+    digest: 'SHA1',
+  }))
 }
 
 test('challenge response hashes challenge + token + exact endpoint in order', async () => {
@@ -121,37 +172,79 @@ test('POST validates the official eBay signed notification fixture and acknowled
   assert.ok(events.some((event) => event.stage === 'client_secret_present' && event.present === true))
   assert.ok(events.some((event) => event.stage === 'oauth_token_request_status' && event.status === 200))
   assert.ok(events.some((event) => event.stage === 'public_key_request_status' && event.status === 200))
-  assert.ok(events.some((event) => event.stage === 'signature_verified'))
+  assert.ok(events.some((event) => event.stage === 'signature_verified_canonical' && event.raw_matches_reserialized === true))
+  assert.equal(events.some((event) => event.stage === 'signature_verified_raw'), false)
   const diagnostics = JSON.stringify(events)
-  for (const sensitive of ['fixture-secret', 'test-app-token', fixture.signature, fixture.message.notification.data.userId, fixture.message.notification.data.eiasToken]) {
+  for (const sensitive of [
+    'fixture-secret',
+    'test-app-token',
+    fixture.signature,
+    JSON.parse(atob(fixture.signature)).signature,
+    JSON.stringify(fixture.message),
+    fixture.publicKey,
+    fixture.message.notification.data.username,
+    fixture.message.notification.data.userId,
+    fixture.message.notification.data.eiasToken,
+  ]) {
     assert.equal(diagnostics.includes(sensitive), false)
   }
 })
 
-test('Node crypto path passes the original eBay DER bytes directly with canonical SHA1', () => {
-  const originalDerSignature = JSON.parse(atob(fixture.signature)).signature
-  const publicKeyPem = fixture.publicKey.replace(/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\s/g, '')
-  const eBaySdkVerifier = createVerify('ssl3-sha1')
-  eBaySdkVerifier.update(JSON.stringify(fixture.message))
-  const eBaySdkResult = eBaySdkVerifier.verify(`-----BEGIN PUBLIC KEY-----\n${publicKeyPem}\n-----END PUBLIC KEY-----`, originalDerSignature, 'base64')
-  let observed
-  const valid = verifyEbaySignature(fixture.message, originalDerSignature, fixture.publicKey, (algorithm) => {
-    assert.equal(algorithm, 'sha1')
-    const verifier = createVerify(algorithm)
-    const nativeVerify = verifier.verify.bind(verifier)
-    verifier.verify = (publicKey, signature, encoding) => {
-      observed = { publicKey, signature, encoding }
-      return nativeVerify(publicKey, signature, encoding)
-    }
-    return verifier
-  })
-  assert.equal(eBaySdkResult, true)
-  assert.equal(valid, true)
-  assert.equal(valid, eBaySdkResult)
-  assert.equal(Buffer.isBuffer(observed.signature), true)
-  assert.deepEqual(observed.signature, Buffer.from(originalDerSignature, 'base64'))
-  assert.equal(observed.encoding, undefined)
-  assert.match(observed.publicKey, /^-----BEGIN PUBLIC KEY-----\n/)
+test('official eBay fixture verifies with native WebCrypto ECDSA SHA-1 and DER conversion', async () => {
+  const signature = JSON.parse(atob(fixture.signature)).signature
+  const result = await verifyEbaySignature(
+    fixture.message,
+    signature,
+    fixture.publicKey,
+    new TextEncoder().encode(JSON.stringify(fixture.message)),
+    webcrypto.subtle,
+  )
+  assert.deepEqual(result, { mode: 'canonical', rawMatchesReserialized: true })
+})
+
+test('DER conversion handles required leading-zero r and s and emits exactly 64 bytes', () => {
+  const r = new Uint8Array(33)
+  const s = new Uint8Array(33)
+  r[0] = 0
+  r[1] = 0x80
+  s[0] = 0
+  s[1] = 0x91
+  for (let index = 2; index < 33; index += 1) {
+    r[index] = index
+    s[index] = 0xff - index
+  }
+  const rInteger = concatBytes(new Uint8Array([0x02, r.length]), r)
+  const sInteger = concatBytes(new Uint8Array([0x02, s.length]), s)
+  const content = concatBytes(rInteger, sInteger)
+  const der = concatBytes(new Uint8Array([0x30, content.length]), content)
+  const p1363 = derEcdsaToP1363(der)
+  assert.equal(p1363.byteLength, 64)
+  assert.equal(p1363[0], 0x80)
+  assert.equal(p1363[32], 0x91)
+  assert.deepEqual(p1363.subarray(1, 32), r.subarray(2))
+  assert.deepEqual(p1363.subarray(33), s.subarray(2))
+})
+
+test('native WebCrypto SHA-1 ECDSA verifies a whitespace-different raw request body', async () => {
+  const rawBody = `\n ${JSON.stringify(fixture.message)} \n`
+  const { signatureDer, publicKey } = await signTextWithEphemeralKey(rawBody)
+  const signatureHeader = eBaySignatureHeader(signatureDer)
+  const events = []
+  const fetchImpl = async (url) => url === 'https://api.ebay.com/identity/v1/oauth2/token'
+    ? Response.json({ access_token: 'test-app-token', expires_in: 3600 })
+    : Response.json({ key: publicKey, algorithm: 'ECDSA', digest: 'SHA1' })
+  const response = await makeHandler({ fetchImpl, log: (stage, details) => events.push({ stage, ...details }) })(new Request(endpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-ebay-signature': signatureHeader },
+    body: rawBody,
+  }))
+  assert.equal(response.status, 204)
+  assert.ok(events.some((event) => event.stage === 'signature_verified_raw' && event.raw_matches_reserialized === false))
+  assert.equal(events.some((event) => event.stage === 'signature_verified_canonical'), false)
+  const diagnostics = JSON.stringify(events)
+  for (const sensitive of ['fixture-secret', 'test-app-token', rawBody, signatureHeader, bytesToBase64(signatureDer), publicKey, fixture.message.notification.data.userId, fixture.message.notification.data.eiasToken]) {
+    assert.equal(diagnostics.includes(sensitive), false)
+  }
 })
 
 test('POST safely diagnoses public-key lookup failure without logging provider response data', async () => {
@@ -189,29 +282,27 @@ test('POST rejects a tampered signed payload', async () => {
     body: JSON.stringify(tampered),
   }))
   assert.equal(response.status, 412)
-  assert.ok(events.some((event) => event.stage === 'signature_verify_failed'))
+  assert.ok(events.some((event) => event.stage === 'signature_verify_failed' && event.raw_matches_reserialized === true))
   assert.equal(events.some((event) => event.stage === 'signature_verify_exception'), false)
   assert.equal(JSON.stringify(events).includes('modified-user'), false)
 })
 
-test('POST distinguishes a crypto verification exception from a false signature result', async () => {
+test('POST diagnoses WebCrypto exceptions without logging exception messages or payload data', async () => {
   const events = []
   const fetchImpl = async (url) => url === 'https://api.ebay.com/identity/v1/oauth2/token'
     ? Response.json({ access_token: 'test-app-token', expires_in: 3600 })
     : Response.json({ key: fixture.publicKey, algorithm: 'ECDSA', digest: 'SHA1' })
-  const cryptoError = Object.assign(new TypeError('NEVER-LOG-CRYPTO-DETAIL'), { code: 'ERR_OSSL_EVP_UNSUPPORTED' })
-  const createVerifyImpl = () => ({
-    update() { return this },
-    end() { return this },
-    verify() { throw cryptoError },
-  })
-  const response = await makeHandler({ fetchImpl, createVerifyImpl, log: (stage, details) => events.push({ stage, ...details }) })(new Request(endpoint, {
+  const subtleImpl = {
+    importKey: async () => ({}),
+    verify: async () => { throw new TypeError('NEVER-LOG-CRYPTO-DETAIL') },
+  }
+  const response = await makeHandler({ fetchImpl, subtleImpl, log: (stage, details) => events.push({ stage, ...details }) })(new Request(endpoint, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-ebay-signature': fixture.signature },
     body: JSON.stringify(fixture.message),
   }))
   assert.equal(response.status, 503)
-  assert.ok(events.some((event) => event.stage === 'signature_verify_exception' && event.error_name === 'TypeError' && event.error_code === 'ERR_OSSL_EVP_UNSUPPORTED'))
+  assert.ok(events.some((event) => event.stage === 'signature_verify_exception' && event.error_name === 'TypeError' && event.raw_matches_reserialized === true))
   assert.equal(events.some((event) => event.stage === 'signature_verify_failed'), false)
   assert.equal(JSON.stringify(events).includes('NEVER-LOG-CRYPTO-DETAIL'), false)
   assert.equal(JSON.stringify(events).includes(fixture.message.notification.data.userId), false)
@@ -243,7 +334,10 @@ test('POST rejects a syntactically encoded but malformed DER signature', async (
   assert.notEqual(response.status, 204)
   assert.ok([412, 503].includes(response.status))
   const diagnostics = JSON.stringify(events)
+  assert.ok(events.some((event) => event.stage === 'signature_verify_exception' && event.raw_matches_reserialized === true))
+  assert.equal(events.some((event) => event.stage === 'signature_verified_canonical' || event.stage === 'signature_verified_raw'), false)
   assert.equal(diagnostics.includes(malformedHeader), false)
+  assert.equal(diagnostics.includes(fixture.message.notification.data.username), false)
   assert.equal(diagnostics.includes(fixture.message.notification.data.userId), false)
   assert.equal(diagnostics.includes(fixture.message.notification.data.eiasToken), false)
 })
@@ -265,17 +359,20 @@ test('secrets are read from the server environment and are not hard-coded', asyn
   assert.doesNotMatch(source, /SUPABASE_SERVICE_ROLE_KEY/)
 })
 
-test('Edge Function entrypoint uses Deno with the supported Node crypto built-in', async () => {
+test('Edge Function entrypoint uses Deno native WebCrypto for ECDSA verification', async () => {
   const { readFile } = await import('node:fs/promises')
   const source = await readFile(new URL('../supabase/functions/ebay-account-deletion/server.mjs', import.meta.url), 'utf8')
   const entrypoint = await readFile(new URL('../supabase/functions/ebay-account-deletion/index.ts', import.meta.url), 'utf8')
-  assert.match(source, /from ['"]node:crypto['"]/) 
-  assert.match(source, /from ['"]node:buffer['"]/) 
-  assert.match(source, /const EBAY_SIGNATURE_ALGORITHM = 'sha1'/)
-  assert.match(source, /verifier\.end\(\)/)
-  assert.match(source, /Buffer\.from\(signatureBase64, 'base64'\)/)
-  assert.match(source, /verifyEbaySignature\(payload, signature\.signature, publicKey, createVerifyImpl\)/)
-  assert.doesNotMatch(source, /crypto\.subtle\.verify|derEcdsaToP1363/)
+  assert.doesNotMatch(source, /node:crypto|node:buffer|createVerify/)
+  assert.match(source, /crypto\.subtle|globalThis\.crypto\?\.subtle/)
+  assert.match(source, /derEcdsaToP1363/)
+  assert.match(source, /'spki'/)
+  assert.match(source, /namedCurve: 'P-256'/)
+  assert.match(source, /hash: 'SHA-1'/)
+  assert.match(source, /signature_verified_canonical/)
+  assert.match(source, /signature_verified_raw/)
+  assert.match(source, /raw_matches_reserialized/)
+  assert.doesNotMatch(source, /console\.log\([^)]*(?:rawBody|publicKey|signature|userId|eiasToken)/)
   assert.match(entrypoint, /Deno\.serve\(createHandler/)
 })
 
