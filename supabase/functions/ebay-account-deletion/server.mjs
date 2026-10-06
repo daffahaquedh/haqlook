@@ -1,11 +1,22 @@
 import { createVerify } from 'node:crypto'
+import { Buffer } from 'node:buffer'
 
 const MAX_BODY_BYTES = 64 * 1024
 const EBAY_OAUTH_URL = 'https://api.ebay.com/identity/v1/oauth2/token'
 const EBAY_PUBLIC_KEY_URL = 'https://api.ebay.com/commerce/notification/v1/public_key/'
-const EBAY_SIGNATURE_ALGORITHM = 'ssl3-sha1'
+// eBay's Node SDK names SHA-1 as `ssl3-sha1` (an OpenSSL alias). Use the
+// canonical SHA-1 name so Deno's Node-crypto compatibility layer can resolve it.
+const EBAY_SIGNATURE_ALGORITHM = 'sha1'
 const PUBLIC_KEY_TTL_MS = 60 * 60 * 1000
 const REQUEST_TIMEOUT_MS = 8_000
+const SAFE_CRYPTO_ERROR_NAMES = new Set(['Error', 'TypeError', 'RangeError', 'NotSupportedError', 'OperationError', 'DataError'])
+const SAFE_CRYPTO_ERROR_CODES = new Set([
+  'ERR_CRYPTO_INVALID_DIGEST',
+  'ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE',
+  'ERR_INVALID_ARG_TYPE',
+  'ERR_INVALID_ARG_VALUE',
+  'ERR_OSSL_EVP_UNSUPPORTED',
+])
 
 const keyCache = new Map()
 let appTokenCache = null
@@ -48,9 +59,10 @@ function formatPublicKey(publicKey) {
 export function verifyEbaySignature(payload, signatureBase64, publicKey, createVerifyImpl = createVerify) {
   const verifier = createVerifyImpl(EBAY_SIGNATURE_ALGORITHM)
   verifier.update(JSON.stringify(payload))
-  // eBay's official SDK passes the original base64-encoded ASN.1 DER bytes
-  // directly to Node crypto; do not convert this signature representation.
-  return verifier.verify(formatPublicKey(publicKey), signatureBase64, 'base64')
+  verifier.end()
+  // Preserve the original ASN.1 DER bytes; Node crypto consumes this form.
+  // No DER-to-P1363 conversion is performed.
+  return verifier.verify(formatPublicKey(publicKey), Buffer.from(signatureBase64, 'base64'))
 }
 
 async function fetchJsonResponse(fetchImpl, url, init) {
@@ -83,6 +95,15 @@ function diagnostic(log, stage, details = {}) {
   } catch {
     // Diagnostics must never change callback behavior.
   }
+}
+
+function safeCryptoErrorDetails(error) {
+  const details = {}
+  const name = error && typeof error === 'object' && typeof error.name === 'string' ? error.name : ''
+  if (SAFE_CRYPTO_ERROR_NAMES.has(name)) details.error_name = name
+  const code = error && typeof error === 'object' && typeof error.code === 'string' ? error.code : ''
+  if (SAFE_CRYPTO_ERROR_CODES.has(code)) details.error_code = code
+  return details
 }
 
 async function getApplicationToken({ appId, clientSecret, fetchImpl, now, log }) {
@@ -252,8 +273,8 @@ export function createHandler({
     let verified
     try {
       verified = verifyEbaySignature(payload, signature.signature, publicKey, createVerifyImpl)
-    } catch {
-      diagnostic(log, 'signature_verify_exception')
+    } catch (error) {
+      diagnostic(log, 'signature_verify_exception', safeCryptoErrorDetails(error))
       return json({ error: 'signature_verification_unavailable' }, 503)
     }
     if (!verified) {
