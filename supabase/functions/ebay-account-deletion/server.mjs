@@ -1,6 +1,9 @@
+import { createVerify } from 'node:crypto'
+
 const MAX_BODY_BYTES = 64 * 1024
 const EBAY_OAUTH_URL = 'https://api.ebay.com/identity/v1/oauth2/token'
 const EBAY_PUBLIC_KEY_URL = 'https://api.ebay.com/commerce/notification/v1/public_key/'
+const EBAY_SIGNATURE_ALGORITHM = 'ssl3-sha1'
 const PUBLIC_KEY_TTL_MS = 60 * 60 * 1000
 const REQUEST_TIMEOUT_MS = 8_000
 
@@ -35,51 +38,19 @@ function readSignatureHeader(raw) {
   }
 }
 
-function decodeBase64(value) {
-  const binary = atob(value)
-  return Uint8Array.from(binary, (char) => char.charCodeAt(0))
+function formatPublicKey(publicKey) {
+  const encodedKey = publicKey
+    .replace(/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\s/g, '')
+  if (!encodedKey) throw new Error('Invalid public key')
+  return `-----BEGIN PUBLIC KEY-----\n${encodedKey}\n-----END PUBLIC KEY-----`
 }
 
-function readDerLength(bytes, offset) {
-  const first = bytes[offset]
-  if (first === undefined) throw new Error('Invalid DER length')
-  if (first < 0x80) return { length: first, next: offset + 1 }
-  const count = first & 0x7f
-  if (count === 0 || count > 2 || offset + count >= bytes.length) throw new Error('Invalid DER length')
-  let length = 0
-  for (let index = 1; index <= count; index += 1) length = (length << 8) | bytes[offset + index]
-  return { length, next: offset + count + 1 }
-}
-
-function derEcdsaToP1363(bytes) {
-  let offset = 0
-  if (bytes[offset++] !== 0x30) throw new Error('Invalid ECDSA sequence')
-  const sequenceLength = readDerLength(bytes, offset)
-  offset = sequenceLength.next
-  const sequenceEnd = offset + sequenceLength.length
-
-  function readInteger() {
-    if (bytes[offset++] !== 0x02) throw new Error('Invalid ECDSA integer')
-    const length = readDerLength(bytes, offset)
-    offset = length.next
-    const end = offset + length.length
-    if (length.length < 1 || end > bytes.length || bytes[offset] & 0x80) throw new Error('Invalid ECDSA integer')
-    let value = bytes.subarray(offset, end)
-    offset = end
-    while (value.length > 32 && value[0] === 0) value = value.subarray(1)
-    if (value.length > 32) throw new Error('ECDSA integer too large')
-    const normalized = new Uint8Array(32)
-    normalized.set(value, 32 - value.length)
-    return normalized
-  }
-
-  const r = readInteger()
-  const s = readInteger()
-  if (offset !== sequenceEnd || sequenceEnd !== bytes.length) throw new Error('Invalid ECDSA sequence size')
-  const result = new Uint8Array(64)
-  result.set(r, 0)
-  result.set(s, 32)
-  return result
+export function verifyEbaySignature(payload, signatureBase64, publicKey, createVerifyImpl = createVerify) {
+  const verifier = createVerifyImpl(EBAY_SIGNATURE_ALGORITHM)
+  verifier.update(JSON.stringify(payload))
+  // eBay's official SDK passes the original base64-encoded ASN.1 DER bytes
+  // directly to Node crypto; do not convert this signature representation.
+  return verifier.verify(formatPublicKey(publicKey), signatureBase64, 'base64')
 }
 
 async function fetchJsonResponse(fetchImpl, url, init) {
@@ -229,6 +200,7 @@ export function createHandler({
   fetchImpl = fetch,
   now = Date.now,
   log = (stage, details) => console.info(JSON.stringify({ component: 'ebay-account-deletion', stage, ...details })),
+  createVerifyImpl = createVerify,
 }) {
   return async function handle(request) {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { Allow: 'GET, POST, OPTIONS' } })
@@ -277,38 +249,11 @@ export function createHandler({
     const publicKey = await getPublicKey({ kid: signature.kid, appId, clientSecret, fetchImpl, now, log })
     if (!publicKey) return json({ error: 'signature_verification_unavailable' }, 503)
 
-    let key
-    try {
-      key = await crypto.subtle.importKey(
-        'spki',
-        decodeBase64(publicKey.replace(/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\s/g, '')),
-        { name: 'ECDSA', namedCurve: 'P-256' },
-        false,
-        ['verify'],
-      )
-    } catch {
-      diagnostic(log, 'signature_import_failed')
-      return json({ error: 'signature_verification_unavailable' }, 503)
-    }
-
-    let signatureBytes
-    try {
-      signatureBytes = derEcdsaToP1363(decodeBase64(signature.signature))
-    } catch {
-      diagnostic(log, 'signature_verify_failed')
-      return json({ error: 'invalid_signature' }, 412)
-    }
-
     let verified
     try {
-      verified = await crypto.subtle.verify(
-        { name: 'ECDSA', hash: 'SHA-1' },
-        key,
-        signatureBytes,
-        new TextEncoder().encode(JSON.stringify(payload)),
-      )
+      verified = verifyEbaySignature(payload, signature.signature, publicKey, createVerifyImpl)
     } catch {
-      diagnostic(log, 'signature_verify_failed')
+      diagnostic(log, 'signature_verify_exception')
       return json({ error: 'signature_verification_unavailable' }, 503)
     }
     if (!verified) {
