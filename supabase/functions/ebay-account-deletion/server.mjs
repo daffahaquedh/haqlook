@@ -1,22 +1,10 @@
-import { createVerify } from 'node:crypto'
-import { Buffer } from 'node:buffer'
-
 const MAX_BODY_BYTES = 64 * 1024
 const EBAY_OAUTH_URL = 'https://api.ebay.com/identity/v1/oauth2/token'
 const EBAY_PUBLIC_KEY_URL = 'https://api.ebay.com/commerce/notification/v1/public_key/'
-// eBay's Node SDK names SHA-1 as `ssl3-sha1` (an OpenSSL alias). Use the
-// canonical SHA-1 name so Deno's Node-crypto compatibility layer can resolve it.
-const EBAY_SIGNATURE_ALGORITHM = 'sha1'
+const EBAY_SIGNATURE_ALGORITHM = Object.freeze({ name: 'ECDSA', hash: 'SHA-1' })
 const PUBLIC_KEY_TTL_MS = 60 * 60 * 1000
 const REQUEST_TIMEOUT_MS = 8_000
 const SAFE_CRYPTO_ERROR_NAMES = new Set(['Error', 'TypeError', 'RangeError', 'NotSupportedError', 'OperationError', 'DataError'])
-const SAFE_CRYPTO_ERROR_CODES = new Set([
-  'ERR_CRYPTO_INVALID_DIGEST',
-  'ERR_CRYPTO_INVALID_KEY_OBJECT_TYPE',
-  'ERR_INVALID_ARG_TYPE',
-  'ERR_INVALID_ARG_VALUE',
-  'ERR_OSSL_EVP_UNSUPPORTED',
-])
 
 const keyCache = new Map()
 let appTokenCache = null
@@ -49,20 +37,126 @@ function readSignatureHeader(raw) {
   }
 }
 
-function formatPublicKey(publicKey) {
-  const encodedKey = publicKey
-    .replace(/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\s/g, '')
-  if (!encodedKey) throw new Error('Invalid public key')
-  return `-----BEGIN PUBLIC KEY-----\n${encodedKey}\n-----END PUBLIC KEY-----`
+function readDerLength(bytes, cursor) {
+  if (cursor.offset >= bytes.length) throw new Error('Invalid ECDSA signature')
+  const first = bytes[cursor.offset++]
+  if (first < 0x80) return first
+
+  const octetCount = first & 0x7f
+  if (octetCount === 0 || octetCount > 2 || cursor.offset + octetCount > bytes.length) {
+    throw new Error('Invalid ECDSA signature')
+  }
+  if (bytes[cursor.offset] === 0) throw new Error('Invalid ECDSA signature')
+
+  let length = 0
+  for (let index = 0; index < octetCount; index += 1) {
+    length = (length * 256) + bytes[cursor.offset++]
+  }
+  if (length < 0x80) throw new Error('Invalid ECDSA signature')
+  return length
 }
 
-export function verifyEbaySignature(payload, signatureBase64, publicKey, createVerifyImpl = createVerify) {
-  const verifier = createVerifyImpl(EBAY_SIGNATURE_ALGORITHM)
-  verifier.update(JSON.stringify(payload))
-  verifier.end()
-  // Preserve the original ASN.1 DER bytes; Node crypto consumes this form.
-  // No DER-to-P1363 conversion is performed.
-  return verifier.verify(formatPublicKey(publicKey), Buffer.from(signatureBase64, 'base64'))
+function readDerInteger(bytes, cursor, sequenceEnd) {
+  if (cursor.offset >= sequenceEnd || bytes[cursor.offset++] !== 0x02) {
+    throw new Error('Invalid ECDSA signature')
+  }
+  const length = readDerLength(bytes, cursor)
+  const end = cursor.offset + length
+  if (length === 0 || end > sequenceEnd) throw new Error('Invalid ECDSA signature')
+
+  let integer = bytes.subarray(cursor.offset, end)
+  cursor.offset = end
+  if (integer[0] & 0x80) throw new Error('Invalid ECDSA signature')
+  if (integer.length > 1 && integer[0] === 0) {
+    if ((integer[1] & 0x80) === 0) throw new Error('Invalid ECDSA signature')
+    integer = integer.subarray(1)
+  }
+  if (integer.length > 32) throw new Error('Invalid ECDSA signature')
+  return integer
+}
+
+export function derEcdsaToP1363(signatureBytes) {
+  if (!(signatureBytes instanceof Uint8Array)) throw new Error('Invalid ECDSA signature')
+  const cursor = { offset: 0 }
+  if (signatureBytes[cursor.offset++] !== 0x30) throw new Error('Invalid ECDSA signature')
+  const sequenceLength = readDerLength(signatureBytes, cursor)
+  const sequenceEnd = cursor.offset + sequenceLength
+  if (sequenceEnd !== signatureBytes.length) throw new Error('Invalid ECDSA signature')
+
+  const r = readDerInteger(signatureBytes, cursor, sequenceEnd)
+  const s = readDerInteger(signatureBytes, cursor, sequenceEnd)
+  if (cursor.offset !== sequenceEnd) throw new Error('Invalid ECDSA signature')
+
+  const result = new Uint8Array(64)
+  result.set(r, 32 - r.length)
+  result.set(s, 64 - s.length)
+  return result
+}
+
+function decodeBase64(value) {
+  if (typeof value !== 'string' || !value || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+    throw new Error('Invalid base64 data')
+  }
+  const binary = atob(value)
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0))
+}
+
+function decodePublicKeySpki(publicKey) {
+  if (typeof publicKey !== 'string') throw new Error('Invalid public key')
+  const match = publicKey.match(/-----BEGIN PUBLIC KEY-----([\s\S]+?)-----END PUBLIC KEY-----/)
+  if (!match) throw new Error('Invalid public key')
+  return decodeBase64(match[1].replace(/\s/g, ''))
+}
+
+function equalBytes(left, right) {
+  if (left.byteLength !== right.byteLength) return false
+  for (let index = 0; index < left.byteLength; index += 1) {
+    if (left[index] !== right[index]) return false
+  }
+  return true
+}
+
+export async function verifyEbaySignature(
+  payload,
+  signatureBase64,
+  publicKey,
+  rawBodyBytes,
+  subtleImpl = globalThis.crypto?.subtle,
+) {
+  if (!subtleImpl) throw new TypeError('Web Crypto unavailable')
+  if (!(rawBodyBytes instanceof Uint8Array)) throw new TypeError('Raw request bytes unavailable')
+
+  const canonicalBytes = new TextEncoder().encode(JSON.stringify(payload))
+  const rawMatchesReserialized = equalBytes(rawBodyBytes, canonicalBytes)
+  const derSignature = decodeBase64(signatureBase64)
+  const p1363Signature = derEcdsaToP1363(derSignature)
+  const key = await subtleImpl.importKey(
+    'spki',
+    decodePublicKeySpki(publicKey),
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    false,
+    ['verify'],
+  )
+
+  const canonicalValid = await subtleImpl.verify(
+    EBAY_SIGNATURE_ALGORITHM,
+    key,
+    p1363Signature,
+    canonicalBytes,
+  )
+  if (canonicalValid) return { mode: 'canonical', rawMatchesReserialized }
+
+  if (!rawMatchesReserialized) {
+    const rawValid = await subtleImpl.verify(
+      EBAY_SIGNATURE_ALGORITHM,
+      key,
+      p1363Signature,
+      rawBodyBytes,
+    )
+    if (rawValid) return { mode: 'raw', rawMatchesReserialized }
+  }
+
+  return { mode: null, rawMatchesReserialized }
 }
 
 async function fetchJsonResponse(fetchImpl, url, init) {
@@ -101,8 +195,6 @@ function safeCryptoErrorDetails(error) {
   const details = {}
   const name = error && typeof error === 'object' && typeof error.name === 'string' ? error.name : ''
   if (SAFE_CRYPTO_ERROR_NAMES.has(name)) details.error_name = name
-  const code = error && typeof error === 'object' && typeof error.code === 'string' ? error.code : ''
-  if (SAFE_CRYPTO_ERROR_CODES.has(code)) details.error_code = code
   return details
 }
 
@@ -211,7 +303,8 @@ async function readLimitedBody(request) {
     bytes.set(chunk, offset)
     offset += chunk.byteLength
   }
-  return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  const rawBody = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  return { rawBody, rawBodyBytes: bytes }
 }
 
 export function createHandler({
@@ -221,7 +314,7 @@ export function createHandler({
   fetchImpl = fetch,
   now = Date.now,
   log = (stage, details) => console.info(JSON.stringify({ component: 'ebay-account-deletion', stage, ...details })),
-  createVerifyImpl = createVerify,
+  subtleImpl = globalThis.crypto?.subtle,
 }) {
   return async function handle(request) {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { Allow: 'GET, POST, OPTIONS' } })
@@ -240,14 +333,15 @@ export function createHandler({
     if (request.method !== 'POST') return json({ error: 'method_not_allowed' }, 405, { Allow: 'GET, POST, OPTIONS' })
     if (!/^application\/json(?:\s*;|$)/i.test(request.headers.get('content-type') || '')) return json({ error: 'unsupported_media_type' }, 415)
 
-    let rawBody
+    let body
     try {
-      rawBody = await readLimitedBody(request)
+      body = await readLimitedBody(request)
     } catch {
       return json({ error: 'invalid_payload' }, 400)
     }
-    if (rawBody === null) return json({ error: 'payload_too_large_or_empty' }, 413)
+    if (body === null) return json({ error: 'payload_too_large_or_empty' }, 413)
 
+    const { rawBody, rawBodyBytes } = body
     let payload
     try {
       payload = JSON.parse(rawBody)
@@ -270,18 +364,40 @@ export function createHandler({
     const publicKey = await getPublicKey({ kid: signature.kid, appId, clientSecret, fetchImpl, now, log })
     if (!publicKey) return json({ error: 'signature_verification_unavailable' }, 503)
 
-    let verified
+    const rawMatchesReserialized = equalBytes(
+      rawBodyBytes,
+      new TextEncoder().encode(JSON.stringify(payload)),
+    )
+    let verification
     try {
-      verified = verifyEbaySignature(payload, signature.signature, publicKey, createVerifyImpl)
+      verification = await verifyEbaySignature(
+        payload,
+        signature.signature,
+        publicKey,
+        rawBodyBytes,
+        subtleImpl,
+      )
     } catch (error) {
-      diagnostic(log, 'signature_verify_exception', safeCryptoErrorDetails(error))
+      diagnostic(log, 'signature_verify_exception', {
+        raw_matches_reserialized: rawMatchesReserialized,
+        ...safeCryptoErrorDetails(error),
+      })
       return json({ error: 'signature_verification_unavailable' }, 503)
     }
-    if (!verified) {
-      diagnostic(log, 'signature_verify_failed')
+    if (verification.mode === 'canonical') {
+      diagnostic(log, 'signature_verified_canonical', {
+        raw_matches_reserialized: verification.rawMatchesReserialized,
+      })
+    } else if (verification.mode === 'raw') {
+      diagnostic(log, 'signature_verified_raw', {
+        raw_matches_reserialized: verification.rawMatchesReserialized,
+      })
+    } else {
+      diagnostic(log, 'signature_verify_failed', {
+        raw_matches_reserialized: verification.rawMatchesReserialized,
+      })
       return json({ error: 'invalid_signature' }, 412)
     }
-    diagnostic(log, 'signature_verified')
 
     // HAQLOOKS currently persists no eBay user/customer data. A valid notice is
     // acknowledged without mutating unrelated business records.
