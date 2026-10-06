@@ -116,7 +116,7 @@ export const ADMIN_INSIGHT_TABS = [
 
 export const ADMIN_SETTINGS_TABS = [
   { id: 'users', href: '/seller/users-roles', label: 'Pengguna & Peran', unavailable: true },
-  { id: 'marketplaces', href: '/seller/marketplace-settings', label: 'Marketplace', unavailable: true },
+  { id: 'marketplaces', href: '/seller/marketplace-settings', label: 'Marketplace' },
   { id: 'ai-budget', href: '/seller/settings', label: 'AI & Anggaran' },
   { id: 'app', href: '/seller/app-settings', label: 'Aplikasi', unavailable: true },
 ]

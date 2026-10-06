@@ -25,3 +25,5 @@
 @media(max-width:480px){
   .hero-title{font-size:clamp(3.9rem,16.5vw,4.35rem)}
 }
+
+.privacy-policy{display:grid;grid-template-columns:minmax(0,1fr);gap:0;max-width:980px}.privacy-policy article{max-width:860px}.privacy-contact{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:22px}.privacy-contact a{color:var(--orange2);font-weight:800;text-underline-offset:3px}

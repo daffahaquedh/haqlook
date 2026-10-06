@@ -218,8 +218,74 @@ function AdminSettingsWorkspace({ path }) {
   const activeTab = adminSettingsTabForPath(path)
   const page = activeTab === 'ai-budget'
     ? <SettingsPage />
-    : <ComingSoonPage title={ADMIN_SETTINGS_TABS.find((tab) => tab.id === activeTab)?.label || 'Pengaturan'} />
+    : activeTab === 'marketplaces'
+      ? <EbayConnectionSettings />
+      : <ComingSoonPage title={ADMIN_SETTINGS_TABS.find((tab) => tab.id === activeTab)?.label || 'Pengaturan'} />
   return <AdminWorkspaceShell title="Pengaturan" description="Kelola kontrol yang sudah tersedia; bagian lain ditandai jelas bila belum aktif." tabs={ADMIN_SETTINGS_TABS} activeTab={activeTab}>{page}</AdminWorkspaceShell>
+}
+
+function EbayConnectionSettings() {
+  const [status, setStatus] = useState({ loading: true, connected: false })
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState(() => {
+    const value = new URLSearchParams(window.location.search).get('ebay')
+    if (value === 'connected') return { tone: 'success', text: 'Akun eBay berhasil disambungkan ke HAQLOOKS.' }
+    if (value === 'cancelled') return { tone: 'info', text: 'Otorisasi eBay dibatalkan. Tidak ada perubahan pada koneksi.' }
+    if (value === 'error') return { tone: 'warning', text: 'Akun eBay belum tersambung. Silakan coba lagi atau hubungi Admin.' }
+    return null
+  })
+
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    url.searchParams.delete('ebay')
+    url.searchParams.delete('reason')
+    window.history.replaceState(window.history.state, '', url.pathname + url.search + url.hash)
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    async function loadStatus() {
+      if (!supabase) {
+        if (active) setStatus({ loading: false, connected: false, unavailable: true })
+        return
+      }
+      const { data, error } = await supabase.functions.invoke('ebay-oauth-callback', { body: { action: 'status' } })
+      if (!active) return
+      if (error || !data?.ok) setStatus({ loading: false, connected: false, unavailable: true })
+      else setStatus({ loading: false, connected: Boolean(data.connected), connectedAt: data.connected_at || null, expiresAt: data.refresh_token_expires_at || null })
+    }
+    void loadStatus()
+    return () => { active = false }
+  }, [])
+
+  async function beginAuthorization() {
+    setBusy(true)
+    setNotice(null)
+    try {
+      if (!supabase) throw new Error('unavailable')
+      const { data, error } = await supabase.functions.invoke('ebay-oauth-callback', { body: { action: 'start' } })
+      if (error || !data?.authorization_url) throw new Error('unavailable')
+      const destination = new URL(data.authorization_url)
+      if (destination.origin !== 'https://auth.ebay.com' || destination.pathname !== '/oauth2/authorize') throw new Error('unavailable')
+      window.location.assign(destination.toString())
+    } catch {
+      setNotice({ tone: 'warning', text: 'Belum dapat memulai koneksi eBay. Coba lagi beberapa saat.' })
+      setBusy(false)
+    }
+  }
+
+  return <section className="ebay-settings-page" aria-labelledby="ebay-settings-title">
+    <header><span className="seller-kicker">MARKETPLACE / AKUN TOKO</span><h2 id="ebay-settings-title">eBay</h2><p>Hubungkan akun eBay Production untuk menyiapkan integrasi toko.</p></header>
+    {notice && <div className={`seller-notice ${notice.tone}`} role="status" aria-live="polite">{notice.text}</div>}
+    <div className="ebay-connection-panel">
+      <div><span className="seller-kicker">STATUS KONEKSI</span><strong>{status.loading ? 'Memeriksa koneksi…' : status.unavailable ? 'Status belum tersedia' : status.connected ? 'Akun eBay terhubung' : 'Belum terhubung'}</strong>
+        {!status.loading && status.connected && status.connectedAt && <small>Terhubung {dateLabel(status.connectedAt)}</small>}
+        {!status.loading && status.connected && status.expiresAt && <small>Izin berlaku hingga {dateLabel(status.expiresAt)}</small>}
+      </div>
+      <button type="button" className="seller-primary" onClick={beginAuthorization} disabled={busy || status.loading}>{busy ? 'Membuka eBay…' : status.connected ? 'Hubungkan ulang akun eBay' : 'Hubungkan akun eBay'}</button>
+    </div>
+    <p className="seller-muted ebay-privacy-note">eBay akan menampilkan izin sebelum Anda menyetujui. Kredensial koneksi diproses dan disimpan server-side; tahap ini belum membaca atau mengubah listing, pesanan, maupun data pembeli. <a href="/privacy">Baca Kebijakan Privasi</a>.</p>
+  </section>
 }
 
 function SellerSidebar({ path, profile, onLogout }) {
