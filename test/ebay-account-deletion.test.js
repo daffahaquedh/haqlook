@@ -128,11 +128,15 @@ test('POST validates the official eBay signed notification fixture and acknowled
   }
 })
 
-test('Node crypto path passes eBay original base64 DER signature directly to the official SDK algorithm', () => {
+test('Node crypto path passes the original eBay DER bytes directly with canonical SHA1', () => {
   const originalDerSignature = JSON.parse(atob(fixture.signature)).signature
+  const publicKeyPem = fixture.publicKey.replace(/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----|\s/g, '')
+  const eBaySdkVerifier = createVerify('ssl3-sha1')
+  eBaySdkVerifier.update(JSON.stringify(fixture.message))
+  const eBaySdkResult = eBaySdkVerifier.verify(`-----BEGIN PUBLIC KEY-----\n${publicKeyPem}\n-----END PUBLIC KEY-----`, originalDerSignature, 'base64')
   let observed
   const valid = verifyEbaySignature(fixture.message, originalDerSignature, fixture.publicKey, (algorithm) => {
-    assert.equal(algorithm, 'ssl3-sha1')
+    assert.equal(algorithm, 'sha1')
     const verifier = createVerify(algorithm)
     const nativeVerify = verifier.verify.bind(verifier)
     verifier.verify = (publicKey, signature, encoding) => {
@@ -141,9 +145,12 @@ test('Node crypto path passes eBay original base64 DER signature directly to the
     }
     return verifier
   })
+  assert.equal(eBaySdkResult, true)
   assert.equal(valid, true)
-  assert.equal(observed.signature, originalDerSignature)
-  assert.equal(observed.encoding, 'base64')
+  assert.equal(valid, eBaySdkResult)
+  assert.equal(Buffer.isBuffer(observed.signature), true)
+  assert.deepEqual(observed.signature, Buffer.from(originalDerSignature, 'base64'))
+  assert.equal(observed.encoding, undefined)
   assert.match(observed.publicKey, /^-----BEGIN PUBLIC KEY-----\n/)
 })
 
@@ -192,9 +199,11 @@ test('POST distinguishes a crypto verification exception from a false signature 
   const fetchImpl = async (url) => url === 'https://api.ebay.com/identity/v1/oauth2/token'
     ? Response.json({ access_token: 'test-app-token', expires_in: 3600 })
     : Response.json({ key: fixture.publicKey, algorithm: 'ECDSA', digest: 'SHA1' })
+  const cryptoError = Object.assign(new TypeError('NEVER-LOG-CRYPTO-DETAIL'), { code: 'ERR_OSSL_EVP_UNSUPPORTED' })
   const createVerifyImpl = () => ({
     update() { return this },
-    verify() { throw new Error('NEVER-LOG-CRYPTO-DETAIL') },
+    end() { return this },
+    verify() { throw cryptoError },
   })
   const response = await makeHandler({ fetchImpl, createVerifyImpl, log: (stage, details) => events.push({ stage, ...details }) })(new Request(endpoint, {
     method: 'POST',
@@ -202,9 +211,10 @@ test('POST distinguishes a crypto verification exception from a false signature 
     body: JSON.stringify(fixture.message),
   }))
   assert.equal(response.status, 503)
-  assert.ok(events.some((event) => event.stage === 'signature_verify_exception'))
+  assert.ok(events.some((event) => event.stage === 'signature_verify_exception' && event.error_name === 'TypeError' && event.error_code === 'ERR_OSSL_EVP_UNSUPPORTED'))
   assert.equal(events.some((event) => event.stage === 'signature_verify_failed'), false)
   assert.equal(JSON.stringify(events).includes('NEVER-LOG-CRYPTO-DETAIL'), false)
+  assert.equal(JSON.stringify(events).includes(fixture.message.notification.data.userId), false)
 })
 
 test('POST fails closed when server credentials are unavailable', async () => {
@@ -215,6 +225,27 @@ test('POST fails closed when server credentials are unavailable', async () => {
     body: JSON.stringify(fixture.message),
   }))
   assert.equal(response.status, 503)
+})
+
+test('POST rejects a syntactically encoded but malformed DER signature', async () => {
+  const header = JSON.parse(atob(fixture.signature))
+  header.signature = btoa('not-an-ecdsa-der-signature')
+  const malformedHeader = btoa(JSON.stringify(header))
+  const events = []
+  const fetchImpl = async (url) => url === 'https://api.ebay.com/identity/v1/oauth2/token'
+    ? Response.json({ access_token: 'test-app-token', expires_in: 3600 })
+    : Response.json({ key: fixture.publicKey, algorithm: 'ECDSA', digest: 'SHA1' })
+  const response = await makeHandler({ fetchImpl, log: (stage, details) => events.push({ stage, ...details }) })(new Request(endpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-ebay-signature': malformedHeader },
+    body: JSON.stringify(fixture.message),
+  }))
+  assert.notEqual(response.status, 204)
+  assert.ok([412, 503].includes(response.status))
+  const diagnostics = JSON.stringify(events)
+  assert.equal(diagnostics.includes(malformedHeader), false)
+  assert.equal(diagnostics.includes(fixture.message.notification.data.userId), false)
+  assert.equal(diagnostics.includes(fixture.message.notification.data.eiasToken), false)
 })
 
 test('only the eBay deletion function disables JWT verification', async () => {
@@ -239,6 +270,10 @@ test('Edge Function entrypoint uses Deno with the supported Node crypto built-in
   const source = await readFile(new URL('../supabase/functions/ebay-account-deletion/server.mjs', import.meta.url), 'utf8')
   const entrypoint = await readFile(new URL('../supabase/functions/ebay-account-deletion/index.ts', import.meta.url), 'utf8')
   assert.match(source, /from ['"]node:crypto['"]/) 
+  assert.match(source, /from ['"]node:buffer['"]/) 
+  assert.match(source, /const EBAY_SIGNATURE_ALGORITHM = 'sha1'/)
+  assert.match(source, /verifier\.end\(\)/)
+  assert.match(source, /Buffer\.from\(signatureBase64, 'base64'\)/)
   assert.match(source, /verifyEbaySignature\(payload, signature\.signature, publicKey, createVerifyImpl\)/)
   assert.doesNotMatch(source, /crypto\.subtle\.verify|derEcdsaToP1363/)
   assert.match(entrypoint, /Deno\.serve\(createHandler/)
