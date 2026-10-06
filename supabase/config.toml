@@ -1,0 +1,5 @@
+[functions.seller-ai]
+verify_jwt = true
+
+[functions.ebay-account-deletion]
+verify_jwt = false
