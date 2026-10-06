@@ -80,6 +80,7 @@ function App(){
   else if(path==='/archive') page=<Archive products={products} loading={loading} catalogError={catalogError} onRetry={loadPublicProducts} />
   else if(path==='/about') page=<About />
   else if(path==='/shipping') page=<Shipping />
+  else if(path==='/privacy') page=<Privacy />
   else if(path==='/staff' || path==='/admin/login') page=<StaffLogin />
   else if(path==='/admin') page=<SellerApp path={path} />
   else if(path==='/seller' || path.startsWith('/seller/')) page=<SellerApp path={path} />
@@ -257,6 +258,8 @@ function Archive({products,loading,catalogError,onRetry}){
 function About(){ return <PageIntro eyebrow="ABOUT HAQLOOKS" title={<>MORE THAN<br/>SNEAKERS.</>} copy="HAQLOOKS is a curated pre-owned sneaker store from Indonesia. We give iconic pairs a second home and build a bigger community around sneakers, style, and stories."><div className="editorial">{[['01','Curated with character.','Every pair should feel selected, not mass listed.'],['02','Photos before promises.','Pre-owned shopping works best when buyers can inspect the pair clearly.'],['03','Indonesia to anywhere.','Built for local and international buyers with worldwide shipping support.']].map(x=><article key={x[0]}><span>{x[0]}</span><h2>{x[1]}</h2><p>{x[2]}</p></article>)}</div></PageIntro> }
 function Shipping(){ return <PageIntro eyebrow="SHIPS FROM INDONESIA" title="WORLDWIDE SHIPPING" copy="Biaya pengiriman dikonfirmasi sesuai tujuan, ukuran paket, dan ketersediaan kurir."><div className="editorial shipping">{[['01','Pilih barang','Periksa ukuran, kondisi, status, dan foto.'],['02','Hubungi Haqlooks','Kirim tautan barang serta negara dan kode pos tujuan.'],['03','Konfirmasi ongkir','Biaya pengiriman diinformasikan sebelum pembayaran.'],['04','Dikemas & dikirim','Barang dikemas dan dikirim dari Indonesia.']].map(x=><article key={x[0]}><span>{x[0]}</span><h2>{x[1]}</h2><p>{x[2]}</p></article>)}</div><div className="notice">Pajak impor, biaya bea cukai, dan pungutan lokal dapat dikenakan oleh negara tujuan dan menjadi tanggung jawab pembeli.</div><div className="shipping-actions"><Link to="/shop" className="btn primary">Jelajahi barang</Link><a href="https://www.instagram.com/haqlook/" target="_blank" rel="noreferrer" className="textlink">TANYAKAN PENGIRIMAN <span aria-hidden="true">↗</span></a></div></PageIntro> }
 
+function Privacy(){ return <PageIntro eyebrow="HAQLOOKS / PRIVACY" title="PRIVACY POLICY" copy="Cara HAQLOOKS menangani otorisasi eBay untuk fitur operasional toko."><div className="editorial privacy-policy">{[['01','Data yang diproses','Jika Admin menghubungkan eBay, HAQLOOKS menukar authorization code di server dan menyimpan refresh token serta masa berlakunya di penyimpanan server yang tidak dapat dibaca browser. OAuth state disimpan dalam bentuk hash dan kedaluwarsa setelah 10 menit.'],['02','Penggunaan koneksi','Pada tahap koneksi ini HAQLOOKS hanya menyimpan kredensial untuk koneksi eBay. Sistem belum mengambil listing, pesanan, pesan, data pembeli, atau data akun eBay lainnya, dan tidak membuat listing, pembelian, maupun pesan otomatis. eBay menampilkan izin yang diminta sebelum persetujuan.'],['03','Keamanan dan kendali','Token tidak dikirim ke frontend, localStorage, URL akhir, atau log aplikasi. Anda dapat mencabut izin melalui pengaturan akses aplikasi pihak ketiga di akun eBay. Untuk bantuan menghapus koneksi HAQLOOKS, hubungi kami melalui Instagram.'],['04','Pembaruan kebijakan','Jika HAQLOOKS mulai memproses data eBay lain pada masa mendatang, kebijakan ini akan diperbarui sebelum fitur tersebut digunakan.']].map(item=><article key={item[0]}><span>{item[0]}</span><h2>{item[1]}</h2><p>{item[2]}</p></article>)}</div><div className="notice privacy-contact">Pertanyaan privasi? <a href="https://www.instagram.com/haqlook/" target="_blank" rel="noreferrer">Hubungi HAQLOOKS melalui Instagram ↗</a></div></PageIntro> }
+
 function PageIntro({eyebrow,title,copy,children}){ return <main className="page"><section className="shell intro"><p className="eyebrow orange">{eyebrow}</p><h1>{title}</h1><p>{copy}</p></section><section className="shell section">{children}</section></main> }
 function Empty({text}){ return <div className="empty"><b>{text}</b></div> }
 
@@ -339,11 +342,23 @@ function Footer({staffEntry='anonymous'}){
   return <footer id="contact"><div className="shell footer-grid precise-footer">
     <div><div className="footer-brand">HAQLOOKS</div><p>Pre-owned sneakers. New stories.</p></div>
     <div><strong>Shop</strong><Link to="/shop">All Products</Link><Link to="/shop">New Arrivals</Link><Link to="/archive">Archive</Link></div>
-    <div><strong>About</strong><Link to="/about">Our Story</Link><Link to="/shipping">Shipping</Link><a href="https://www.instagram.com/haqlook/" target="_blank" rel="noreferrer">Instagram</a></div>
+    <div><strong>About</strong><Link to="/about">Our Story</Link><Link to="/shipping">Shipping</Link><Link to="/privacy">Privacy Policy</Link><a href="https://www.instagram.com/haqlook/" target="_blank" rel="noreferrer">Instagram</a></div>
     <div><strong>Follow Us</strong><a href="https://www.instagram.com/haqlook/" target="_blank" rel="noreferrer">Instagram @haqlook</a><span>Let&apos;s talk sneakers.</span><Link to={staffEntry==='staff'?'/seller':'/staff'} className="footer-staff-entry">{staffEntry==='staff'?'Panel':'Staff Login'}</Link></div>
     <div className="footer-bottom"><span>© 2026 HAQLOOKS. All rights reserved.</span><span>◎ Indonesia</span><span>Sneakers. People. A Better Tomorrow.</span></div>
   </div></footer>
 }
+
+function scrubEbayCallbackQuery(){
+  if(window.location.pathname!=='/seller/marketplace-settings')return
+  const url=new URL(window.location.href)
+  const providerError=url.searchParams.has('error')||url.searchParams.has('error_description')
+  const sensitive=['code','state','access_token','refresh_token','error','error_description','expires_in','token_type']
+  if(!sensitive.some(key=>url.searchParams.has(key)))return
+  sensitive.forEach(key=>url.searchParams.delete(key))
+  if(providerError&&!url.searchParams.has('ebay'))url.searchParams.set('ebay','cancelled')
+  window.history.replaceState(window.history.state,'',url.pathname+url.search+url.hash)
+}
+scrubEbayCallbackQuery()
 
 createRoot(document.getElementById('root')).render(<App />)
 
