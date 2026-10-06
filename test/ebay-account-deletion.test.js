@@ -20,8 +20,8 @@ const fixture = {
   publicKey: '-----BEGIN PUBLIC KEY-----MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEZhhxXKtR+TOvtDbgTPCkSof02qgBB7IsYOyf76ilExJ/upAa/vKIKheOoCyOpcLmi4t0b4uepb7LLjmMr90FUg==-----END PUBLIC KEY-----',
 }
 
-function makeHandler({ secrets = { EBAY_DELETION_VERIFY_TOKEN: token, EBAY_CLIENT_SECRET: 'fixture-secret' }, fetchImpl } = {}) {
-  return createHandler({ endpoint, appId, getSecret: (name) => secrets[name] || '', ...(fetchImpl ? { fetchImpl } : {}) })
+function makeHandler({ secrets = { EBAY_DELETION_VERIFY_TOKEN: token, EBAY_CLIENT_SECRET: 'fixture-secret' }, fetchImpl, log = () => {} } = {}) {
+  return createHandler({ endpoint, appId, getSecret: (name) => secrets[name] || '', log, ...(fetchImpl ? { fetchImpl } : {}) })
 }
 
 test('challenge response hashes challenge + token + exact endpoint in order', async () => {
@@ -69,9 +69,33 @@ test('POST rejects missing or malformed eBay signature without contacting eBay',
   assert.equal(response.status, 412)
 })
 
+test('POST safely diagnoses a rejected Production-token-shaped OAuth response', async () => {
+  const events = []
+  const fetchImpl = async (url, init) => {
+    assert.equal(url, 'https://api.ebay.com/identity/v1/oauth2/token')
+    assert.equal(init.method, 'POST')
+    assert.equal(init.body, 'grant_type=client_credentials&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope')
+    return Response.json({ error: 'invalid_client', error_description: 'NEVER-LOG-DESCRIPTION', access_token: 'NEVER-LOG-TOKEN' }, { status: 401 })
+  }
+  const response = await makeHandler({ fetchImpl, log: (stage, details) => events.push({ stage, ...details }) })(new Request(endpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-ebay-signature': fixture.signature },
+    body: JSON.stringify(fixture.message),
+  }))
+  assert.equal(response.status, 503)
+  assert.ok(events.some((event) => event.stage === 'client_secret_present' && event.present === true))
+  assert.ok(events.some((event) => event.stage === 'oauth_token_request_status' && event.status === 401))
+  assert.ok(events.some((event) => event.stage === 'oauth_token_failed' && event.status === 401 && event.error_code === 'invalid_client'))
+  const diagnostics = JSON.stringify(events)
+  for (const sensitive of ['fixture-secret', 'NEVER-LOG-DESCRIPTION', 'NEVER-LOG-TOKEN', fixture.signature, fixture.message.notification.data.userId, fixture.message.notification.data.eiasToken]) {
+    assert.equal(diagnostics.includes(sensitive), false)
+  }
+})
+
 test('POST validates the official eBay signed notification fixture and acknowledges without mutation', async () => {
   let oauthCalls = 0
   let keyCalls = 0
+  const events = []
   const fetchImpl = async (url, init) => {
     if (url === 'https://api.ebay.com/identity/v1/oauth2/token') {
       oauthCalls += 1
@@ -84,7 +108,7 @@ test('POST validates the official eBay signed notification fixture and acknowled
     assert.equal(init.headers.Authorization, 'Bearer test-app-token')
     return Response.json({ key: fixture.publicKey, algorithm: 'ECDSA', digest: 'SHA1' })
   }
-  const response = await makeHandler({ fetchImpl })(new Request(endpoint, {
+  const response = await makeHandler({ fetchImpl, log: (stage, details) => events.push({ stage, ...details }) })(new Request(endpoint, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-ebay-signature': fixture.signature },
     body: JSON.stringify(fixture.message),
@@ -93,6 +117,36 @@ test('POST validates the official eBay signed notification fixture and acknowled
   assert.equal(await response.text(), '')
   assert.equal(oauthCalls, 1)
   assert.equal(keyCalls, 1)
+  assert.ok(events.some((event) => event.stage === 'client_secret_present' && event.present === true))
+  assert.ok(events.some((event) => event.stage === 'oauth_token_request_status' && event.status === 200))
+  assert.ok(events.some((event) => event.stage === 'public_key_request_status' && event.status === 200))
+  assert.ok(events.some((event) => event.stage === 'signature_verified'))
+  const diagnostics = JSON.stringify(events)
+  for (const sensitive of ['fixture-secret', 'test-app-token', fixture.signature, fixture.message.notification.data.userId, fixture.message.notification.data.eiasToken]) {
+    assert.equal(diagnostics.includes(sensitive), false)
+  }
+})
+
+test('POST safely diagnoses public-key lookup failure without logging provider response data', async () => {
+  const events = []
+  const fetchImpl = async (url) => url === 'https://api.ebay.com/identity/v1/oauth2/token'
+    ? Response.json({ access_token: 'test-app-token', expires_in: 3600 })
+    : Response.json({ error: 'access_denied', detail: 'NEVER-LOG-DETAIL', key: 'NEVER-LOG-KEY' }, { status: 403 })
+  const header = JSON.parse(atob(fixture.signature))
+  header.kid = 'a936261a-7d7b-4621-a0f1-96ccb428af49'
+  const uniqueSignatureHeader = btoa(JSON.stringify(header))
+  const response = await makeHandler({ fetchImpl, log: (stage, details) => events.push({ stage, ...details }) })(new Request(endpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-ebay-signature': uniqueSignatureHeader },
+    body: JSON.stringify(fixture.message),
+  }))
+  assert.equal(response.status, 503)
+  assert.ok(events.some((event) => event.stage === 'public_key_request_status' && event.status === 403))
+  assert.ok(events.some((event) => event.stage === 'public_key_failed' && event.status === 403 && event.error_code === 'access_denied'))
+  const diagnostics = JSON.stringify(events)
+  for (const sensitive of ['fixture-secret', 'test-app-token', 'NEVER-LOG-DETAIL', 'NEVER-LOG-KEY', uniqueSignatureHeader, fixture.message.notification.data.userId, fixture.message.notification.data.eiasToken]) {
+    assert.equal(diagnostics.includes(sensitive), false)
+  }
 })
 
 test('POST rejects a tampered signed payload', async () => {
@@ -135,3 +189,4 @@ test('secrets are read from the server environment and are not hard-coded', asyn
   assert.doesNotMatch(source, /EBAY_DELETION_VERIFY_TOKEN\s*=|EBAY_CLIENT_SECRET\s*=|OPENAI_API_KEY\s*=/)
   assert.doesNotMatch(source, /SUPABASE_SERVICE_ROLE_KEY/)
 })
+
