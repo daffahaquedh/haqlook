@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createHandler, makeChallengeResponse } from '../supabase/functions/ebay-account-deletion/server.mjs'
+import { createVerify } from 'node:crypto'
+import { createHandler, makeChallengeResponse, verifyEbaySignature } from '../supabase/functions/ebay-account-deletion/server.mjs'
 
 const endpoint = 'https://akihuhhabslzhxyjxwoz.supabase.co/functions/v1/ebay-account-deletion'
 const token = 'A'.repeat(32)
@@ -20,8 +21,8 @@ const fixture = {
   publicKey: '-----BEGIN PUBLIC KEY-----MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEZhhxXKtR+TOvtDbgTPCkSof02qgBB7IsYOyf76ilExJ/upAa/vKIKheOoCyOpcLmi4t0b4uepb7LLjmMr90FUg==-----END PUBLIC KEY-----',
 }
 
-function makeHandler({ secrets = { EBAY_DELETION_VERIFY_TOKEN: token, EBAY_CLIENT_SECRET: 'fixture-secret' }, fetchImpl, log = () => {} } = {}) {
-  return createHandler({ endpoint, appId, getSecret: (name) => secrets[name] || '', log, ...(fetchImpl ? { fetchImpl } : {}) })
+function makeHandler({ secrets = { EBAY_DELETION_VERIFY_TOKEN: token, EBAY_CLIENT_SECRET: 'fixture-secret' }, fetchImpl, log = () => {}, createVerifyImpl } = {}) {
+  return createHandler({ endpoint, appId, getSecret: (name) => secrets[name] || '', log, ...(fetchImpl ? { fetchImpl } : {}), ...(createVerifyImpl ? { createVerifyImpl } : {}) })
 }
 
 test('challenge response hashes challenge + token + exact endpoint in order', async () => {
@@ -127,6 +128,25 @@ test('POST validates the official eBay signed notification fixture and acknowled
   }
 })
 
+test('Node crypto path passes eBay original base64 DER signature directly to the official SDK algorithm', () => {
+  const originalDerSignature = JSON.parse(atob(fixture.signature)).signature
+  let observed
+  const valid = verifyEbaySignature(fixture.message, originalDerSignature, fixture.publicKey, (algorithm) => {
+    assert.equal(algorithm, 'ssl3-sha1')
+    const verifier = createVerify(algorithm)
+    const nativeVerify = verifier.verify.bind(verifier)
+    verifier.verify = (publicKey, signature, encoding) => {
+      observed = { publicKey, signature, encoding }
+      return nativeVerify(publicKey, signature, encoding)
+    }
+    return verifier
+  })
+  assert.equal(valid, true)
+  assert.equal(observed.signature, originalDerSignature)
+  assert.equal(observed.encoding, 'base64')
+  assert.match(observed.publicKey, /^-----BEGIN PUBLIC KEY-----\n/)
+})
+
 test('POST safely diagnoses public-key lookup failure without logging provider response data', async () => {
   const events = []
   const fetchImpl = async (url) => url === 'https://api.ebay.com/identity/v1/oauth2/token'
@@ -155,12 +175,36 @@ test('POST rejects a tampered signed payload', async () => {
     : Response.json({ key: fixture.publicKey, algorithm: 'ECDSA', digest: 'SHA1' })
   const tampered = structuredClone(fixture.message)
   tampered.notification.data.userId = 'modified-user'
-  const response = await makeHandler({ fetchImpl })(new Request(endpoint, {
+  const events = []
+  const response = await makeHandler({ fetchImpl, log: (stage, details) => events.push({ stage, ...details }) })(new Request(endpoint, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-ebay-signature': fixture.signature },
     body: JSON.stringify(tampered),
   }))
   assert.equal(response.status, 412)
+  assert.ok(events.some((event) => event.stage === 'signature_verify_failed'))
+  assert.equal(events.some((event) => event.stage === 'signature_verify_exception'), false)
+  assert.equal(JSON.stringify(events).includes('modified-user'), false)
+})
+
+test('POST distinguishes a crypto verification exception from a false signature result', async () => {
+  const events = []
+  const fetchImpl = async (url) => url === 'https://api.ebay.com/identity/v1/oauth2/token'
+    ? Response.json({ access_token: 'test-app-token', expires_in: 3600 })
+    : Response.json({ key: fixture.publicKey, algorithm: 'ECDSA', digest: 'SHA1' })
+  const createVerifyImpl = () => ({
+    update() { return this },
+    verify() { throw new Error('NEVER-LOG-CRYPTO-DETAIL') },
+  })
+  const response = await makeHandler({ fetchImpl, createVerifyImpl, log: (stage, details) => events.push({ stage, ...details }) })(new Request(endpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-ebay-signature': fixture.signature },
+    body: JSON.stringify(fixture.message),
+  }))
+  assert.equal(response.status, 503)
+  assert.ok(events.some((event) => event.stage === 'signature_verify_exception'))
+  assert.equal(events.some((event) => event.stage === 'signature_verify_failed'), false)
+  assert.equal(JSON.stringify(events).includes('NEVER-LOG-CRYPTO-DETAIL'), false)
 })
 
 test('POST fails closed when server credentials are unavailable', async () => {
@@ -188,5 +232,15 @@ test('secrets are read from the server environment and are not hard-coded', asyn
   assert.match(source, /Deno\.env\.get\(name\)/)
   assert.doesNotMatch(source, /EBAY_DELETION_VERIFY_TOKEN\s*=|EBAY_CLIENT_SECRET\s*=|OPENAI_API_KEY\s*=/)
   assert.doesNotMatch(source, /SUPABASE_SERVICE_ROLE_KEY/)
+})
+
+test('Edge Function entrypoint uses Deno with the supported Node crypto built-in', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const source = await readFile(new URL('../supabase/functions/ebay-account-deletion/server.mjs', import.meta.url), 'utf8')
+  const entrypoint = await readFile(new URL('../supabase/functions/ebay-account-deletion/index.ts', import.meta.url), 'utf8')
+  assert.match(source, /from ['"]node:crypto['"]/) 
+  assert.match(source, /verifyEbaySignature\(payload, signature\.signature, publicKey, createVerifyImpl\)/)
+  assert.doesNotMatch(source, /crypto\.subtle\.verify|derEcdsaToP1363/)
+  assert.match(entrypoint, /Deno\.serve\(createHandler/)
 })
 
